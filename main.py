@@ -321,66 +321,66 @@ class PIDController(Node):
                 ]
 
                 # 距离检查
-                # distance = self.distance_detector.detect_line_distance(cv_image)
-                # print("当前距离为", distance)
-                # if distance < 80:
-                #     self.distance_detector_used = False
-                #     self.pid_used = False
-                #     self.first_straight = True
+                distance = self.distance_detector.detect_line_distance(cv_image)
+                print("当前距离为", distance)
+                if distance < 130:
+                    self.distance_detector_used = False
+                    self.pid_used = False
+                    self.first_straight = True
 
-            # # 角度调节
-            # elif not self.adjust_line:
-            #     self.get_logger().info("机器狗转弯前角度调节")
-            #     self.start_flag_timer("pid_used", 5.0, False)
-            #     self.start_flag_timer("adjust_line", 5.0)
-            #     # PID 控制初始化
-            #     if not self.pid_used:
-            #         self.pid = PID(kp=0.6, ki=0.0, kd=0.4, output_limits=(-1.0, 1.0))
-            #         self.pid_used = True
+            # 角度调节
+            elif not self.adjust_line:
+                self.get_logger().info("机器狗转弯前角度调节")
+                self.start_flag_timer("pid_used", 5.0, False)
+                self.start_flag_timer("adjust_line", 5.0)
+                # PID 控制初始化
+                if not self.pid_used:
+                    self.pid = PID(kp=0.6, ki=0.0, kd=0.4, output_limits=(-1.0, 1.0))
+                    self.pid_used = True
 
-            #     deviation = compute_line_offset(cv_image)
-            #     print("偏航角:", deviation)
+                deviation = compute_line_offset(cv_image)
+                print("偏航角:", deviation)
 
-            #     base_speed = 0.3
-            #     # 用 PID 计算修正量
-            #     correction = self.pid.calculate(0.0, deviation)
-            #     print("比例系数:", correction)
+                base_speed = 0.3
+                # 用 PID 计算修正量
+                correction = self.pid.calculate(0.0, deviation)
+                print("比例系数:", correction)
 
-            #     self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
-            #     self.motioncontroller.cmd_msg.vel_des = [
-            #         0.0,
-            #         0.0,
-            #         base_speed * correction,
-            #     ]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+                self.motioncontroller.cmd_msg.vel_des = [
+                    0.0,
+                    0.0,
+                    base_speed * correction,
+                ]
 
-            # # 前进补正
-            # elif not self.straight_fix:
-            #     self.get_logger().info("机器狗前进补正")
+            # 前进补正
+            elif not self.straight_fix:
+                self.get_logger().info("机器狗前进补正")
 
-            #     self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.0]
+                self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.0]
 
-            #     # 底线距离计算器初始化
-            #     if not self.distance_detector_used:
-            #         self.distance_detector = LineDistanceDetector(
-            #             roi_width=20, smooth_window=5
-            #         )
-            #         self.distance_detector_used = True
+                # 底线距离计算器初始化
+                if not self.distance_detector_used:
+                    self.distance_detector = LineDistanceDetector(
+                        roi_width=20, smooth_window=5
+                    )
+                    self.distance_detector_used = True
 
-            #     # 距离检查
-            #     distance = self.distance_detector.detect_line_distance(cv_image)
-            #     print("当前距离为", distance)
-            #     if distance < 40:
-            #         self.distance_detector_used = False
-            #         self.straight_fix = True
+                # 距离检查
+                distance = self.distance_detector.detect_line_distance(cv_image)
+                print("当前距离为", distance)
+                if distance < 40:
+                    self.distance_detector_used = False
+                    self.straight_fix = True
 
             # 直角转弯
-            # elif not self.first_turn:
-            #     self.get_logger().info("机器狗第一次转弯")
-            #     self.motioncontroller.cmd_msg.motion_id = 308
-            #     self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-            #     self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.62]
-            #     self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
-            #     self.start_flag_timer("first_turn", 3.0)
+            elif not self.first_turn:
+                self.get_logger().info("机器狗第一次转弯")
+                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.62]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+                self.start_flag_timer("first_turn", 3.0)
 
             else:
                 self.motioncontroller.cmd_msg.motion_id = 101
