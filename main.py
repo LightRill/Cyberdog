@@ -19,6 +19,7 @@ from motion_controller import MotionController
 from straight_detector import detect_deviation
 from angle_turn import LineDistanceDetector, compute_line_offset
 from qrcode_text_detector import text_detector
+from audio import play_tts
 
 
 def get_namespace():
@@ -115,6 +116,7 @@ class PIDController(Node):
         self.second_straight = False
         self.text1_get = False
         self.text1_result = None
+        self.audio_finished = False
         self.first_adjust = False
         self.first_fix = False
 
@@ -438,7 +440,7 @@ class PIDController(Node):
                     print("第一次直角转弯")
                     self.motioncontroller.cmd_msg.motion_id = 308
                     self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-                    self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, -0.61]
+                    self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, -0.60]
                     self.start_flag_timer("first_turn", 3.0, True)
 
                 # 第二次直线行驶
@@ -496,6 +498,9 @@ class PIDController(Node):
                 # 第一次角度调节
                 elif not self.first_adjust:
                     print("第一次角度调节")
+                    # 语音播报
+                    if not self.audio_finished:
+                        self.audio_finished = play_tts(f"识别结果为{self.text1_result}")
                     # PID 控制初始化
                     if not self.pid_used:
                         self.pid = PID(
