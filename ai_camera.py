@@ -9,8 +9,6 @@ import threading
 import subprocess
 import uuid
 
-from qrcode_text_detector import main_detection
-
 
 def get_namespace():
     """自动检测 ROS2 命名空间"""
@@ -114,25 +112,6 @@ class AICameraClient(Node):
             if self.latest_frame is not None:
                 frame = self.latest_frame.copy()
                 cv2.imshow("AI Camera Feed", frame)
-                result = main_detection(frame)
-
-                if result:
-                    display_text = f"识别结果: {result}"
-                    color = (0, 255, 0)
-                else:
-                    display_text = "未识别"
-                    color = (0, 0, 255)
-
-                # 显示识别结果
-                cv2.putText(
-                    frame,
-                    display_text,
-                    (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    color,
-                    2,
-                )
             if cv2.waitKey(20) & 0xFF == ord("q"):
                 self.window_open = False
                 break

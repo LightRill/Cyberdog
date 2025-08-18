@@ -19,7 +19,7 @@ from motion_controller import MotionController
 from straight_detector import detect_deviation
 from angle_turn import LineDistanceDetector, compute_line_offset
 from qrcode_text_detector import text_detector
-from audio import play_tts
+from audio import play_tts_async, shutdown_audio
 
 
 def get_namespace():
@@ -385,7 +385,9 @@ class PIDController(Node):
             time.sleep(rate)
 
     # ----------- 常用动作封装 -----------
-    def run_straight(self, rgb, stop_dist=None, duration=5.0, flag=None):
+    def run_straight(
+        self, rgb, stop_dist=None, ignore_frames=0, duration=5.0, flag=None
+    ):
         """直行一段，支持PID校正和距离触发停止"""
         if not self.pid_used:
             self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
@@ -401,10 +403,11 @@ class PIDController(Node):
         if stop_dist is not None:
             if not self.distance_detector_used:
                 self.distance_detector = LineDistanceDetector(
-                    roi_width=20, smooth_window=5
+                    roi_width=20, smooth_window=5, ignore_frames=ignore_frames
                 )
                 self.distance_detector_used = True
             distance = self.distance_detector.detect_line_distance(rgb)
+            print("距离底线距离为：", distance)
             if distance < stop_dist:
                 self.distance_detector_used = False
                 self.pid_used = False
@@ -435,18 +438,24 @@ class PIDController(Node):
         self.motioncontroller.cmd_msg.motion_id = 308
         self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
         self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
-        self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.3 * correction]
+        self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.1 * correction]
 
-    def run_fix(self, rgb, stop_dist=30):
+    def run_fix(self, rgb, stop_dist=30, ignore_frames=0):
         """前进补正，靠距离触发"""
         if not self.distance_detector_used:
-            self.distance_detector = LineDistanceDetector(roi_width=20, smooth_window=5)
+            self.distance_detector = LineDistanceDetector(
+                roi_width=20,
+                smooth_window=5,
+                ignore_frames=ignore_frames,
+                jump_threshold=50,
+            )
             self.distance_detector_used = True
         self.motioncontroller.cmd_msg.motion_id = 308
         self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
         self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.0]
         self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
         distance = self.distance_detector.detect_line_distance(rgb)
+        print("距离底线距离为：", distance)
         if distance < stop_dist:
             self.distance_detector_used = False
             return True
@@ -503,7 +512,9 @@ class PIDController(Node):
                 # 第二次直线行驶
                 elif not self.straight2 and rgb is not None:
                     print("第二次直线行驶")
-                    self.straight2 = self.run_straight(rgb, stop_dist=120)
+                    self.straight2 = self.run_straight(
+                        rgb, stop_dist=130, ignore_frames=3
+                    )
 
                 # 文本识别段（使用 AI 相机帧 ai）
                 elif self.straight2 and not self.text1_result and ai is not None:
@@ -523,12 +534,15 @@ class PIDController(Node):
                         self.text1_get = True
                         self.start_flag_timer("text1_get", 2.0, False)
 
+                # 语音播报
+                elif not self.audio_finished:
+                    print(f"识别结果为{self.text1_result}")
+                    play_tts_async(f"识别结果为{self.text1_result}")
+                    self.audio_finished = True
+
                 # 第一次角度调节
                 elif not self.adjust1:
                     print("第一次角度调节")
-                    # 语音播报
-                    if not self.audio_finished:
-                        self.audio_finished = play_tts(f"识别结果为{self.text1_result}")
                     self.run_adjust(rgb, duration=3.0, flag="adjust1")
 
                 # 第一次前进补正
@@ -542,25 +556,30 @@ class PIDController(Node):
                         self.run_turn(direction="right", duration=3.0, flag="turn2")
                     elif not self.straight3:
                         print("第三次直线行驶")
-                        self.straight3 = self.run_straight(rgb, stop_dist=120)
+                        self.straight3 = self.run_straight(
+                            rgb, stop_dist=120, ignore_frames=3
+                        )
                     elif not self.adjust2:
                         print("第二次角度调节")
                         self.run_adjust(rgb, duration=3.0, flag="adjust2")
                     elif not self.fix2:
                         print("第二次前进补正")
                         self.fix2 = self.run_fix(rgb, stop_dist=30)
-                    if not self.turn3:
-                        print("第二次直角转弯")
+                    elif not self.turn3:
+                        print("第三次直角转弯")
                         self.run_turn(direction="right", duration=3.0, flag="turn3")
                     elif not self.straight4:
-                        print("第三次直线行驶")
-                        self.straight4 = self.run_straight(rgb, stop_dist=120)
+                        print("第四次直线行驶")
+                        self.straight4 = self.run_straight(
+                            rgb, stop_dist=120, ignore_frames=3
+                        )
                     elif not self.adjust3:
-                        print("第二次角度调节")
+                        print("第三次角度调节")
                         self.run_adjust(rgb, duration=3.0, flag="adjust3")
                     elif not self.fix3:
-                        print("第二次前进补正")
+                        print("第三次前进补正")
                         self.fix3 = self.run_fix(rgb, stop_dist=30)
+
                     else:
                         self.park1 = True
 
@@ -630,6 +649,13 @@ class PIDController(Node):
                 self.get_logger().info("发送最终停止相机请求")
         except Exception as e:
             self.get_logger().error(f"停止相机失败: {e}")
+
+        # 停止音频节点
+        try:
+            shutdown_audio()
+            self.get_logger().info("音频节点已关闭")
+        except Exception as e:
+            self.get_logger().warn(f"关闭音频节点异常: {e}")
 
         # 销毁 OpenCV 窗口
         try:
