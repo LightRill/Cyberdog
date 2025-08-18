@@ -563,10 +563,14 @@ class PIDController(Node):
                     print("第一次前进补正")
                     self.fix1 = self.run_fix(rgb, stop_dist=30)
 
-                elif not self.park1 and self.text1_result == "a1":
+                elif not self.park1:
+                    # 根据库位选择方向和标志编号
+                    turn_dir = "right" if self.text1_result == "a1" else "left"
+                    idx = self.text1_result[-1]  # '1' 或 '2'
+
                     if not self.turn2:
                         print("第二次直角转弯")
-                        self.run_turn(direction="right", duration=3.0, flag="turn2")
+                        self.run_turn(direction=turn_dir, duration=3.0, flag="turn2")
                     elif not self.straight3:
                         print("第三次直线行驶")
                         self.straight3 = self.run_straight(
@@ -580,7 +584,7 @@ class PIDController(Node):
                         self.fix2 = self.run_fix(rgb, stop_dist=30)
                     elif not self.turn3:
                         print("第三次直角转弯")
-                        self.run_turn(direction="right", duration=3.0, flag="turn3")
+                        self.run_turn(direction=turn_dir, duration=3.0, flag="turn3")
                     elif not self.straight4:
                         print("第四次直线行驶")
                         self.straight4 = self.run_straight(
@@ -592,17 +596,17 @@ class PIDController(Node):
                     elif not self.fix3:
                         print("第三次前进补正")
                         self.fix3 = self.run_fix(rgb, stop_dist=30)
-                    elif not self.load_ready1:
+                    elif not getattr(self, f"load_ready{idx}"):
                         print("等待装载指令")
                         self.motioncontroller.cmd_msg.motion_id = 101
-                        self.load_ready1 = dark_button(ai)
-                    elif not self.stand_ready1:
+                        setattr(self, f"load_ready{idx}", dark_button(ai))
+                    elif not getattr(self, f"stand_ready{idx}"):
                         print("准备出发")
                         self.motioncontroller.cmd_msg.motion_id = 111
-                        self.start_flag_timer("stand_ready1", 5.0, True)
+                        self.start_flag_timer(f"stand_ready{idx}", 5.0, True)
                     elif not self.turn4:
                         print("原地转向")
-                        self.run_turn(direction="right", duration=6.0, flag="turn4")
+                        self.run_turn(direction=turn_dir, duration=6.0, flag="turn4")
                     elif not self.straight5:
                         print("第五次直线行驶")
                         self.straight5 = self.run_straight(
@@ -616,13 +620,21 @@ class PIDController(Node):
                         self.fix4 = self.run_fix(rgb, stop_dist=30)
                     elif not self.turn5:
                         print("第五次直角转弯")
-                        self.run_turn(direction="left", duration=3.0, flag="turn5")
+                        self.run_turn(
+                            direction=("left" if turn_dir == "right" else "right"),
+                            duration=3.0,
+                            flag="turn5",
+                        )
                     elif not self.straight6:
                         print("第六次直线行驶")
-                        self.run_straight(rgb, duration=3.0, flag="straight6")
+                        self.run_straight(rgb, duration=4.0, flag="straight6")
                     elif not self.turn6:
                         print("第六次直角转弯")
-                        self.run_turn(direction="left", duration=4.0, flag="turn6")
+                        self.run_turn(
+                            direction=("left" if turn_dir == "right" else "right"),
+                            duration=3.0,
+                            flag="turn6",
+                        )
                     else:
                         self.park1 = True
 
