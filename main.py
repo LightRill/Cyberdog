@@ -20,6 +20,7 @@ from straight_detector import detect_deviation
 from angle_turn import LineDistanceDetector, compute_line_offset
 from qrcode_text_detector import text_detector
 from audio import play_tts_async, shutdown_audio
+from button import dark_button
 
 
 def get_namespace():
@@ -130,6 +131,13 @@ class PIDController(Node):
         self.straight4 = False
         self.adjust3 = False
         self.fix3 = False
+
+        self.load_ready = False
+
+        # self.turn4 = False
+        # self.straight5 = False
+        # self.adjust4 = False
+        # self.fix4 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -580,10 +588,15 @@ class PIDController(Node):
                         print("第三次前进补正")
                         self.fix3 = self.run_fix(rgb, stop_dist=30)
 
+                    elif not self.load_ready:
+                        print("等待装载指令")
+                        self.motioncontroller.cmd_msg.motion_id = 111
+                        self.load_ready = dark_button(ai)
+
                     else:
                         self.park1 = True
 
-                elif self.text1_result:
+                else:
                     print("程序结束")
                     # 停止
                     self.motioncontroller.cmd_msg.motion_id = 101
