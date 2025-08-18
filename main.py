@@ -132,12 +132,17 @@ class PIDController(Node):
         self.adjust3 = False
         self.fix3 = False
 
-        self.load_ready = False
+        self.load_ready1 = False
+        self.stand_ready1 = False
 
-        # self.turn4 = False
-        # self.straight5 = False
-        # self.adjust4 = False
-        # self.fix4 = False
+        self.turn4 = False
+        self.straight5 = False
+        self.adjust4 = False
+        self.fix4 = False
+
+        self.turn5 = False
+        self.straight6 = False
+        self.turn6 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -587,12 +592,37 @@ class PIDController(Node):
                     elif not self.fix3:
                         print("第三次前进补正")
                         self.fix3 = self.run_fix(rgb, stop_dist=30)
-
-                    elif not self.load_ready:
+                    elif not self.load_ready1:
                         print("等待装载指令")
+                        self.motioncontroller.cmd_msg.motion_id = 101
+                        self.load_ready1 = dark_button(ai)
+                    elif not self.stand_ready1:
+                        print("准备出发")
                         self.motioncontroller.cmd_msg.motion_id = 111
-                        self.load_ready = dark_button(ai)
-
+                        self.start_flag_timer("stand_ready1", 5.0, True)
+                    elif not self.turn4:
+                        print("原地转向")
+                        self.run_turn(direction="right", duration=6.0, flag="turn4")
+                    elif not self.straight5:
+                        print("第五次直线行驶")
+                        self.straight5 = self.run_straight(
+                            rgb, stop_dist=120, ignore_frames=3
+                        )
+                    elif not self.adjust4:
+                        print("第四次角度调节")
+                        self.run_adjust(rgb, duration=3.0, flag="adjust4")
+                    elif not self.fix4:
+                        print("第四次前进补正")
+                        self.fix4 = self.run_fix(rgb, stop_dist=30)
+                    elif not self.turn5:
+                        print("第五次直角转弯")
+                        self.run_turn(direction="left", duration=3.0, flag="turn5")
+                    elif not self.straight6:
+                        print("第六次直线行驶")
+                        self.run_straight(rgb, duration=3.0, flag="straight6")
+                    elif not self.turn6:
+                        print("第六次直角转弯")
+                        self.run_turn(direction="left", duration=4.0, flag="turn6")
                     else:
                         self.park1 = True
 
