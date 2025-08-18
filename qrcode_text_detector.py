@@ -236,7 +236,8 @@ def text_detector(cv_image):
     # 先尝试二维码识别
     qr_result = decode_qrcode(cv_image)
     if qr_result:
-        return qr_result
+        qr_result = qr_result.lower()
+        return qr_result[0] + qr_result[-1]
 
     # 再尝试文本识别
     text_results = detect_text(cv_image)

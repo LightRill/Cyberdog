@@ -144,6 +144,11 @@ class PIDController(Node):
         self.straight6 = False
         self.turn6 = False
 
+        self.straight7 = False
+        self.adjust5 = False
+        self.fix5 = False
+        self.turn7 = False
+
         # 线程安全：共享帧
         self._lock = threading.RLock()
         self._last_ai_frame: Optional[any] = None
@@ -460,7 +465,7 @@ class PIDController(Node):
                 roi_width=20,
                 smooth_window=5,
                 ignore_frames=ignore_frames,
-                jump_threshold=50,
+                jump_threshold=20,
             )
             self.distance_detector_used = True
         self.motioncontroller.cmd_msg.motion_id = 308
@@ -566,7 +571,6 @@ class PIDController(Node):
                 elif not self.park1:
                     # 根据库位选择方向和标志编号
                     turn_dir = "right" if self.text1_result == "a1" else "left"
-                    idx = self.text1_result[-1]  # '1' 或 '2'
 
                     if not self.turn2:
                         print("第二次直角转弯")
@@ -596,14 +600,14 @@ class PIDController(Node):
                     elif not self.fix3:
                         print("第三次前进补正")
                         self.fix3 = self.run_fix(rgb, stop_dist=30)
-                    elif not getattr(self, f"load_ready{idx}"):
+                    elif not self.load_ready1:
                         print("等待装载指令")
                         self.motioncontroller.cmd_msg.motion_id = 101
-                        setattr(self, f"load_ready{idx}", dark_button(ai))
-                    elif not getattr(self, f"stand_ready{idx}"):
+                        self.load_ready1 = dark_button(ai)
+                    elif not self.stand_ready1:
                         print("准备出发")
                         self.motioncontroller.cmd_msg.motion_id = 111
-                        self.start_flag_timer(f"stand_ready{idx}", 5.0, True)
+                        self.start_flag_timer("stand_ready1", 5.0, True)
                     elif not self.turn4:
                         print("原地转向")
                         self.run_turn(direction=turn_dir, duration=6.0, flag="turn4")
@@ -627,7 +631,7 @@ class PIDController(Node):
                         )
                     elif not self.straight6:
                         print("第六次直线行驶")
-                        self.run_straight(rgb, duration=4.0, flag="straight6")
+                        self.run_straight(rgb, duration=4.5, flag="straight6")
                     elif not self.turn6:
                         print("第六次直角转弯")
                         self.run_turn(
@@ -637,6 +641,21 @@ class PIDController(Node):
                         )
                     else:
                         self.park1 = True
+
+                elif not self.straight7:
+                    print("第七次直线行驶")
+                    self.straight7 = self.run_straight(
+                        rgb, stop_dist=120, ignore_frames=3
+                    )
+                elif not self.adjust5:
+                    print("第五次角度调节")
+                    self.run_adjust(rgb, duration=3.0, flag="adjust5")
+                elif not self.fix5:
+                    print("第五次前进补正")
+                    self.fix5 = self.run_fix(rgb, stop_dist=30)
+                elif not self.turn7:
+                    print("第七次直角转弯")
+                    self.run_turn(direction="right", duration=3.0, flag="turn7")
 
                 else:
                     print("程序结束")
