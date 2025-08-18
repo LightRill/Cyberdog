@@ -115,6 +115,8 @@ class PIDController(Node):
         self.second_straight = False
         self.text1_get = False
         self.text1_result = None
+        self.first_adjust = False
+        self.first_fix = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -410,6 +412,7 @@ class PIDController(Node):
                 # 第一次直线行驶
                 elif not self.first_straight and rgb is not None:
                     print("第一次直线行驶")
+                    # PID 控制初始化
                     if not self.pid_used:
                         self.pid = PID(
                             kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0)
@@ -417,8 +420,8 @@ class PIDController(Node):
                         self.pid_used = True
                     self.motioncontroller.cmd_msg.motion_id = 308
                     self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-                    self.start_flag_timer("first_straight", 4.8, True)
-                    self.start_flag_timer("pid_used", 4.8, False)
+                    self.start_flag_timer("first_straight", 5.0, True)
+                    self.start_flag_timer("pid_used", 5.0, False)
 
                     deviation = detect_deviation(rgb)
                     base_speed = 0.2
@@ -489,6 +492,48 @@ class PIDController(Node):
                         self.text1_result = text_detector(ai)
                         self.text1_get = True
                         self.start_flag_timer("text1_get", 2.0, False)
+
+                # 第一次角度调节
+                elif not self.first_adjust:
+                    print("第一次角度调节")
+                    # PID 控制初始化
+                    if not self.pid_used:
+                        self.pid = PID(
+                            kp=0.6, ki=0.0, kd=0.4, output_limits=(-1.0, 1.0)
+                        )
+                        self.pid_used = True
+                    self.start_flag_timer("pid_used", 3.0, False)
+                    self.start_flag_timer("first_adjust", 3.0, True)
+
+                    self.motioncontroller.cmd_msg.motion_id = 308
+                    deviation = compute_line_offset(rgb)
+                    print("偏航角:", deviation)
+
+                    base_speed = 0.3
+                    correction = self.pid.calculate(0.0, deviation)
+                    print("比例系数:", correction)
+                    self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+                    self.motioncontroller.cmd_msg.vel_des = [
+                        0.0,
+                        0.0,
+                        base_speed * correction,
+                    ]
+
+                elif not self.first_fix:
+                    print("机器狗前进补正")
+                    if not self.distance_detector_used:
+                        self.distance_detector = LineDistanceDetector(
+                            roi_width=20, smooth_window=5
+                        )
+                        self.distance_detector_used = True
+
+                    self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.0]
+                    # 距离检查
+                    distance = self.distance_detector.detect_line_distance(rgb)
+                    print("当前距离为", distance)
+                    if distance < 30:
+                        self.distance_detector_used = False
+                        self.first_fix = True
 
                 elif self.text1_result:
                     print("程序结束")
