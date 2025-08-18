@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+import random
 import time
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 import cv2
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
@@ -13,6 +14,7 @@ import subprocess
 from motion_controller import MotionController
 from straight_detector import detect_deviation
 from angle_turn import LineDistanceDetector, compute_line_offset
+from qrcode_text_detector import text_detector
 
 
 def get_namespace():
@@ -87,15 +89,25 @@ class PIDController(Node):
         self.pid_used = False
         self.motioncontroller = MotionController()
         self.motioncontroller.control_run()
+
+        # 底线距离检测
         self.distance_detector = LineDistanceDetector(roi_width=20, smooth_window=5)
         self.distance_detector_used = False
+
         self.active_timers = {}
         self.bridge = CvBridge()
+
+        # 相机初始化
+        self.ai_camera_get_ready = False
+        self.rgb_camera_get_ready = False
         self.get_ready = False
+
+        # 阶段布尔值
         self.first_straight = False
-        self.adjust_line = False
-        self.straight_fix = False
         self.first_turn = False
+        self.second_straight = False
+        self.text1_get = False
+        self.text1_result = None
 
         # --- 相机服务客户端（先用占位名创建，后续会解析真实服务名） ---
         self.client = self.create_client(CameraService, "camera_service")
@@ -109,7 +121,7 @@ class PIDController(Node):
         cv2.namedWindow("RGB Camera Feed", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("RGB Camera Feed", 800, 600)
 
-        # 🚀 延迟启动：spin 起来后再做服务解析和相机控制
+        # 延迟启动：spin 起来后再做服务解析和相机控制
         self._camera_boot_timer = self.create_timer(1.0, self.try_boot_camera_once)
 
     # ---------- 服务名自动发现 ----------
@@ -253,16 +265,19 @@ class PIDController(Node):
 
     # ----------- 统一订阅两个相机 -----------
     def subscribe_cameras(self):
+        # 定义一个可靠传输的 QoSProfile
+        qos_reliable = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+
         # CyberDog 相机
-        cyberdog_topic = "image"
+        cyberdog_topic = f"{self.get_namespace()}/image"  # 建议用绝对路径
         self.create_subscription(
-            Image, cyberdog_topic, self.image_callback, qos_profile_sensor_data
+            Image, cyberdog_topic, self.image_callback, qos_reliable
         )
         self.get_logger().info(f"已订阅 CyberDog 相机话题: {cyberdog_topic}")
 
         # RGB 相机
         rgb_topic = "/image_rgb"
-        self.create_subscription(Image, rgb_topic, self.rgb_callback, 10)
+        self.create_subscription(Image, rgb_topic, self.rgb_callback, qos_reliable)
         self.get_logger().info(f"已订阅 RGB 相机话题: {rgb_topic}")
 
     # ----------- CyberDog 相机回调 -----------
@@ -271,6 +286,26 @@ class PIDController(Node):
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             cv2.imshow("CyberDog Camera", cv_image)
             key = cv2.waitKey(1)
+
+            if not self.ai_camera_get_ready:
+                self.get_logger().info("RGB相机初始化完成！")
+                self.ai_camera_get_ready = True
+
+            elif self.second_straight and not self.text1_result:
+                self.get_logger().info("机器狗图像识别中")
+                if self.text1_get:
+                    self.motioncontroller.cmd_msg.motion_id = 308
+                    self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                    self.motioncontroller.cmd_msg.vel_des = [
+                        (random.random() - 0.5) * 0.3,
+                        0.0,
+                        0.0,
+                    ]
+                    self.start_flag_timer("text1_get", 2.0, False)
+                else:
+                    self.motioncontroller.cmd_msg.motion_id = 111
+                    self.text1_result = text_detector(cv_image)
+                    self.text1_get = True
 
         except Exception as e:
             self.get_logger().error(f"Image callback error: {e}")
@@ -283,16 +318,54 @@ class PIDController(Node):
             cv2.waitKey(1)
 
             # 控制逻辑示例
-            if not self.get_ready:
-                self.get_logger().info("机器狗初始化中")
-                self.start_flag_timer("get_ready", 5.0)
+            if not self.rgb_camera_get_ready:
+                self.get_logger().info("AI相机初始化完成！")
+                self.rgb_camera_get_ready = True
 
-            # 直线行驶
+            elif not self.get_ready:
+                self.get_logger().info("机器狗整体初始化中")
+                self.start_flag_timer("get_ready", 10.0, True)
+
+            # 第一次直线行驶
             elif not self.first_straight:
                 self.get_logger().info("机器狗第一次直行")
                 self.motioncontroller.cmd_msg.motion_id = 308
                 self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-                self.start_flag_timer("first_straight", 12.0)
+                self.start_flag_timer("first_straight", 4.5)
+                self.start_flag_timer("pid_used", 4.5, False)
+
+                # PID 控制初始化
+                if not self.pid_used:
+                    self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
+                    self.pid_used = True
+
+                deviation = detect_deviation(cv_image)
+                print("偏航角:", deviation)
+
+                base_speed = 0.2
+                # 用 PID 计算修正量
+                correction = 1.5 * self.pid.calculate(0.0, deviation)
+                print("比例系数:", correction)
+
+                self.motioncontroller.cmd_msg.vel_des = [
+                    base_speed,
+                    0.0,
+                    base_speed * correction,
+                ]
+
+            # 第一次直角转弯
+            elif not self.first_turn:
+                self.get_logger().info("机器狗第一次转弯")
+                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, -0.58]
+                self.start_flag_timer("first_turn", 3.0)
+
+            # 第二次直线行驶
+            elif not self.second_straight:
+                self.get_logger().info("机器狗第二次直行")
+                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
 
                 # 底线距离计算器初始化
                 if not self.distance_detector_used:
@@ -323,68 +396,115 @@ class PIDController(Node):
                 # 距离检查
                 distance = self.distance_detector.detect_line_distance(cv_image)
                 print("当前距离为", distance)
-                if distance < 130:
+                if distance < 400:
+                    print("second_straight已经置为True")
                     self.distance_detector_used = False
                     self.pid_used = False
-                    self.first_straight = True
+                    self.second_straight = True
 
-            # 角度调节
-            elif not self.adjust_line:
-                self.get_logger().info("机器狗转弯前角度调节")
-                self.start_flag_timer("pid_used", 5.0, False)
-                self.start_flag_timer("adjust_line", 5.0)
-                # PID 控制初始化
-                if not self.pid_used:
-                    self.pid = PID(kp=0.6, ki=0.0, kd=0.4, output_limits=(-1.0, 1.0))
-                    self.pid_used = True
-
-                deviation = compute_line_offset(cv_image)
-                print("偏航角:", deviation)
-
-                base_speed = 0.3
-                # 用 PID 计算修正量
-                correction = self.pid.calculate(0.0, deviation)
-                print("比例系数:", correction)
-
-                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
-                self.motioncontroller.cmd_msg.vel_des = [
-                    0.0,
-                    0.0,
-                    base_speed * correction,
-                ]
-
-            # 前进补正
-            elif not self.straight_fix:
-                self.get_logger().info("机器狗前进补正")
-
-                self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.0]
-
-                # 底线距离计算器初始化
-                if not self.distance_detector_used:
-                    self.distance_detector = LineDistanceDetector(
-                        roi_width=20, smooth_window=5
-                    )
-                    self.distance_detector_used = True
-
-                # 距离检查
-                distance = self.distance_detector.detect_line_distance(cv_image)
-                print("当前距离为", distance)
-                if distance < 40:
-                    self.distance_detector_used = False
-                    self.straight_fix = True
-
-            # 直角转弯
-            elif not self.first_turn:
-                self.get_logger().info("机器狗第一次转弯")
-                self.motioncontroller.cmd_msg.motion_id = 308
-                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-                self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.62]
-                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
-                self.start_flag_timer("first_turn", 3.0)
-
-            else:
+            elif self.text1_result:
+                print("图像识别结果为:", self.text1_result)
                 self.motioncontroller.cmd_msg.motion_id = 101
                 time.sleep(0.5)
+
+            # # 直线行驶
+            # elif not self.first_straight:
+            #     self.get_logger().info("机器狗第一次直行")
+            #     self.motioncontroller.cmd_msg.motion_id = 308
+            #     self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+            #     self.start_flag_timer("first_straight", 12.0)
+
+            #     # 底线距离计算器初始化
+            #     if not self.distance_detector_used:
+            #         self.distance_detector = LineDistanceDetector(
+            #             roi_width=20, smooth_window=5
+            #         )
+            #         self.distance_detector_used = True
+
+            #     # PID 控制初始化
+            #     if not self.pid_used:
+            #         self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
+            #         self.pid_used = True
+
+            #     deviation = detect_deviation(cv_image)
+            #     print("偏航角:", deviation)
+
+            #     base_speed = 0.2
+            #     # 用 PID 计算修正量
+            #     correction = 2.0 * self.pid.calculate(0.0, deviation)
+            #     print("比例系数:", correction)
+
+            #     self.motioncontroller.cmd_msg.vel_des = [
+            #         base_speed,
+            #         0.0,
+            #         base_speed * correction,
+            #     ]
+
+            #     # 距离检查
+            #     distance = self.distance_detector.detect_line_distance(cv_image)
+            #     print("当前距离为", distance)
+            #     if distance < 130:
+            #         self.distance_detector_used = False
+            #         self.pid_used = False
+            #         self.first_straight = True
+
+            # # 角度调节
+            # elif not self.adjust_line:
+            #     self.get_logger().info("机器狗转弯前角度调节")
+            #     self.start_flag_timer("pid_used", 5.0, False)
+            #     self.start_flag_timer("adjust_line", 5.0)
+            #     # PID 控制初始化
+            #     if not self.pid_used:
+            #         self.pid = PID(kp=0.6, ki=0.0, kd=0.4, output_limits=(-1.0, 1.0))
+            #         self.pid_used = True
+
+            #     deviation = compute_line_offset(cv_image)
+            #     print("偏航角:", deviation)
+
+            #     base_speed = 0.3
+            #     # 用 PID 计算修正量
+            #     correction = self.pid.calculate(0.0, deviation)
+            #     print("比例系数:", correction)
+
+            #     self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+            #     self.motioncontroller.cmd_msg.vel_des = [
+            #         0.0,
+            #         0.0,
+            #         base_speed * correction,
+            #     ]
+
+            # # 前进补正
+            # elif not self.straight_fix:
+            #     self.get_logger().info("机器狗前进补正")
+
+            #     self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.0]
+
+            #     # 底线距离计算器初始化
+            #     if not self.distance_detector_used:
+            #         self.distance_detector = LineDistanceDetector(
+            #             roi_width=20, smooth_window=5
+            #         )
+            #         self.distance_detector_used = True
+
+            #     # 距离检查
+            #     distance = self.distance_detector.detect_line_distance(cv_image)
+            #     print("当前距离为", distance)
+            #     if distance < 40:
+            #         self.distance_detector_used = False
+            #         self.straight_fix = True
+
+            # # 直角转弯
+            # elif not self.first_turn:
+            #     self.get_logger().info("机器狗第一次转弯")
+            #     self.motioncontroller.cmd_msg.motion_id = 308
+            #     self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+            #     self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.62]
+            #     self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+            #     self.start_flag_timer("first_turn", 3.0)
+
+            # else:
+            #     self.motioncontroller.cmd_msg.motion_id = 101
+            #     time.sleep(0.5)
 
         except Exception as e:
             self.get_logger().error(f"RGB 图像处理错误: {str(e)}")
