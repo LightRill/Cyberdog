@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import random
 import time
+from tkinter.tix import Tree
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -154,6 +155,10 @@ class PIDController(Node):
         self.turn7 = False
 
         # 第二部分
+        self.S_road1 = False
+        self.around1 = False
+        self.around2 = False
+        self.around3 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -485,28 +490,6 @@ class PIDController(Node):
             return True
         return False
 
-    def run_S_road(self, rgb, flag="S_roadX"):
-        if not self.pid_used:
-            self.pid = PID(kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0))
-            self.pid_used = True
-        self.motioncontroller.cmd_msg.motion_id = 308
-        self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-        self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
-
-        deviation = detect_deviation(rgb, S_road=True)
-        # print("偏转角度（度）：", deviation)
-        correction = self.pid.calculate(0.0, deviation / 90.0)
-        # print("偏置系数：", correction)
-        self.motioncontroller.cmd_msg.vel_des = [
-            0.15 * (1 - correction),
-            0.0,
-            0.2 * correction * 4.5,
-        ]
-        self.turned_angle += (0.2 * correction * 4.5) / (20.0 * 3 * 0.6)
-        print("当前角度：", self.turned_angle)
-
-        return False
-
     # ----------- 控制状态机线程：固定频率运行，不依赖回调节拍 -----------
     def _control_loop(self):
         hz = 20.0
@@ -545,6 +528,7 @@ class PIDController(Node):
                     # 机器狗整体初始化中
                     pass
 
+                # ------------------------ 第一部分 -----------------------------
                 # 第一次直线行驶
                 elif not self.straight1 and rgb is not None:
                     print("第一次直线行驶")
@@ -684,6 +668,39 @@ class PIDController(Node):
                 elif not self.turn7:
                     print("第七次直角转弯")
                     self.run_turn(direction="right", duration=3.0, flag="turn7")
+
+                # ------------------------ 第二部分 -----------------------------
+                elif not self.S_road1:
+                    print("第一次S弯道")
+                    if not self.pid_used:
+                        self.pid = PID(
+                            kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0)
+                        )
+                        self.pid_used = True
+                        self.turned_angle = 0
+
+                    self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+                    deviation = detect_deviation(rgb, S_road=True)
+                    # print("偏转角度（度）：", deviation)
+                    correction = self.pid.calculate(0.0, deviation / 90.0)
+                    # print("偏置系数：", correction)
+                    self.motioncontroller.cmd_msg.vel_des = [
+                        0.15 * (1 - correction),
+                        0.0,
+                        0.2 * correction * 4.5,
+                    ]
+                    self.turned_angle += (0.2 * correction * 4.5) / (20.0 * 3 * 0.6)
+                    print("当前角度：", self.turned_angle)
+                    if self.turned_angle > 0.95 and not self.around1:
+                        self.around1 = True
+                    elif self.turned_angle < 0.05 and self.around1 and not self.around2:
+                        self.around2 = True
+                    elif self.turned_angle > 0.95 and self.around2 and not self.around3:
+                        self.around3 = True
+                    elif self.turned_angle < 0.50 and self.around3:
+                        self.S_road1 = True
+
+                # ------------------------ 第三部分 -----------------------------
 
                 else:
                     print("程序结束")
