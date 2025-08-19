@@ -22,6 +22,7 @@ from angle_turn import LineDistanceDetector, compute_line_offset
 from qrcode_text_detector import text_detector
 from audio import play_tts_async, shutdown_audio
 from button import dark_button
+from arrow_final import detect_arrow_direction
 
 
 def get_namespace():
@@ -116,7 +117,7 @@ class PIDController(Node):
         self.get_ready = False
 
         # 任务阶段
-        # 第一部分
+        # ----------------------- 第一部分 ---------------------------
         self.straight1 = False
         self.turn1 = False
         self.straight2 = False
@@ -154,11 +155,19 @@ class PIDController(Node):
         self.fix5 = False
         self.turn7 = False
 
-        # 第二部分
+        # ----------------------- 第二部分 ---------------------------
         self.S_road1 = False
         self.around1 = False
         self.around2 = False
         self.around3 = False
+
+        # ----------------------- 第三部分 ---------------------------
+        self.straight31 = False
+        self.arrow_get = False
+        self.arrow_result = None
+        self.audio_finished3 = False
+        self.adjust31 = False
+        self.fix31 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -524,13 +533,13 @@ class PIDController(Node):
 
             # 主逻辑（对应你原先 rgb_callback 的大段控制）
             try:
-                if not self.get_ready:
+                if not self.get_ready or rgb is None:
                     # 机器狗整体初始化中
                     pass
 
                 # ------------------------ 第一部分 -----------------------------
                 # 第一次直线行驶
-                elif not self.straight1 and rgb is not None:
+                elif not self.straight1:
                     print("第一次直线行驶")
                     self.run_straight(rgb, duration=5.0, flag="straight1")
 
@@ -540,7 +549,7 @@ class PIDController(Node):
                     self.run_turn(direction="right", duration=3.0, flag="turn1")
 
                 # 第二次直线行驶
-                elif not self.straight2 and rgb is not None:
+                elif not self.straight2:
                     print("第二次直线行驶")
                     self.straight2 = self.run_straight(
                         rgb, stop_dist=130, ignore_frames=3
@@ -612,7 +621,7 @@ class PIDController(Node):
                     elif not self.fix3:
                         print("第三次前进补正")
                         self.fix3 = self.run_fix(rgb, stop_dist=30)
-                    elif not self.load_ready1:
+                    elif not self.load_ready1 and ai is not None:
                         print("等待装载指令")
                         self.motioncontroller.cmd_msg.motion_id = 101
                         self.load_ready1 = dark_button(ai)
@@ -701,6 +710,46 @@ class PIDController(Node):
                         self.S_road1 = True
 
                 # ------------------------ 第三部分 -----------------------------
+                # 第一次直线行驶
+                elif not self.straight31:
+                    print("第一次直线行驶")
+                    self.straight31 = self.run_straight(
+                        rgb, stop_dist=130, ignore_frames=3
+                    )
+
+                # 箭头识别段（使用 AI 相机帧 ai）
+                elif self.straight31 and not self.arrow_result and ai is not None:
+                    print("第一次箭头识别")
+                    # 进入识别序列：先起步抖动2秒，再识别
+                    if self.arrow_get:
+                        self.motioncontroller.cmd_msg.motion_id = 308
+                        self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                        self.motioncontroller.cmd_msg.vel_des = [
+                            (random.random() - 0.5),
+                            0.0,
+                            0.0,
+                        ]
+                    else:
+                        self.motioncontroller.cmd_msg.motion_id = 111
+                        self.arrow_result = detect_arrow_direction(ai)
+                        self.arrow_get = True
+                        self.start_flag_timer("arrow_get", 2.0, False)
+
+                # 语音播报
+                elif not self.audio_finished3:
+                    print(f"识别结果为{self.arrow_result}")
+                    play_tts_async(f"识别结果为{self.arrow_result}")
+                    self.audio_finished3 = True
+
+                # 第一次角度调节
+                elif not self.adjust31:
+                    print("第一次角度调节")
+                    self.run_adjust(rgb, duration=3.0, flag="adjust31")
+
+                # 第一次前进补正
+                elif not self.fix31:
+                    print("第一次前进补正")
+                    self.fix31 = self.run_fix(rgb, stop_dist=30)
 
                 else:
                     print("程序结束")

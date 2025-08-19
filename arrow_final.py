@@ -2,14 +2,9 @@ import cv2
 import numpy as np
 
 
-def detect_arrow_direction(image_path):
-    # 读取图像
-    img = cv2.imread(image_path)
-    if img is None:
-        return "无法读取图像"
-
+def detect_arrow_direction(cv_image):
     # 转换为HSV颜色空间（更容易检测特定颜色）
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
     # 定义绿色的HSV范围
     lower_green = np.array([35, 50, 50])
@@ -34,7 +29,7 @@ def detect_arrow_direction(image_path):
     defects = cv2.convexityDefects(largest_contour, hull)
 
     if defects is None or len(defects) < 3:
-        return "无法确定箭头方向"
+        return ""
 
     # 找到最深的凸包缺陷（假设这是箭头尖端）
     deepest_defect = max(defects, key=lambda x: x[0, 3])
