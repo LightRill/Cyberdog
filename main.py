@@ -106,12 +106,16 @@ class PIDController(Node):
 
         self.bridge = CvBridge()
 
+        # S 弯角度累计
+        self.turned_angle = 0
+
         # 相机初始化标记
         self.ai_camera_get_ready = False
         self.rgb_camera_get_ready = False
         self.get_ready = False
 
         # 任务阶段
+        # 第一部分
         self.straight1 = False
         self.turn1 = False
         self.straight2 = False
@@ -148,6 +152,8 @@ class PIDController(Node):
         self.adjust5 = False
         self.fix5 = False
         self.turn7 = False
+
+        # 第二部分
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -477,6 +483,28 @@ class PIDController(Node):
         if distance < stop_dist:
             self.distance_detector_used = False
             return True
+        return False
+
+    def run_S_road(self, rgb, flag="S_roadX"):
+        if not self.pid_used:
+            self.pid = PID(kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0))
+            self.pid_used = True
+        self.motioncontroller.cmd_msg.motion_id = 308
+        self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+        self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+
+        deviation = detect_deviation(rgb, S_road=True)
+        # print("偏转角度（度）：", deviation)
+        correction = self.pid.calculate(0.0, deviation / 90.0)
+        # print("偏置系数：", correction)
+        self.motioncontroller.cmd_msg.vel_des = [
+            0.15 * (1 - correction),
+            0.0,
+            0.2 * correction * 4.5,
+        ]
+        self.turned_angle += (0.2 * correction * 4.5) / (20.0 * 3 * 0.6)
+        print("当前角度：", self.turned_angle)
+
         return False
 
     # ----------- 控制状态机线程：固定频率运行，不依赖回调节拍 -----------

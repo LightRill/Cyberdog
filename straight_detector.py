@@ -25,7 +25,7 @@ def safe_fitline(points):
     return line_params
 
 
-def detect_deviation(cv_image):
+def detect_deviation(cv_image, S_road=False):
     """检测图像的偏离角度，返回连续偏航角度（正：右偏，负：左偏）"""
     h, w = cv_image.shape[:2]
     max_dimension = 800
@@ -34,9 +34,14 @@ def detect_deviation(cv_image):
     img = cv2.resize(cv_image, (nw, nh), interpolation=cv2.INTER_AREA)
 
     mask = np.zeros((nh, nw), dtype=np.uint8)
-    bw = nw * 0.40
-    tw = nw * 0.15
-    hr = 0.12
+    if S_road:
+        bw = nw * 0.60
+        tw = nw * 0.40
+        hr = 0.10
+    else:
+        bw = nw * 0.40
+        tw = nw * 0.25
+        hr = 0.12
     pts = np.array(
         [
             [(nw - bw) // 2, nh],
