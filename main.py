@@ -23,6 +23,7 @@ from qrcode_text_detector import text_detector
 from audio import play_tts_async, shutdown_audio
 from button import dark_button
 from arrow_final import detect_arrow_direction
+from height_bar_detector import height_bar_check
 
 
 def get_namespace():
@@ -174,10 +175,11 @@ class PIDController(Node):
         self.audio_finished3 = False
         self.fix31 = False
 
-        self.turn32 = False
+        self.turn31 = False
         self.straight32 = False
         self.adjust32 = False
         self.fix32 = False
+        self.turn32 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -623,7 +625,7 @@ class PIDController(Node):
 
         # 语音播报
         elif not self.audio_finished:
-            print(f"识别结果为{self.text1_result}")
+            print(f"A区域库位{self.text1_result[-1]}")
             play_tts_async(f"识别结果为{self.text1_result}")
             self.audio_finished = True
 
@@ -791,8 +793,9 @@ class PIDController(Node):
 
         # 语音播报
         elif not self.audio_finished3:
+            text = "左侧路线" if self.arrow_result == "left" else "右侧路线"
             print(f"识别结果为{self.arrow_result}")
-            play_tts_async(f"识别结果为{self.arrow_result}")
+            play_tts_async(text)
             self.audio_finished3 = True
 
         # 第一次前进补正
@@ -804,10 +807,40 @@ class PIDController(Node):
 
     # ------------------------ 第三部分（左侧） ----------------------
     def third_part_left(self, rgb, ai):
+        if not self.turn31:
+            print("turn31直角转弯")
+            self.run_turn(direction="left", duration=3.0, flag="turn31")
+        elif not self.straight32:
+            print("straight32直线行驶")
+            self.straight32 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust32:
+            print("adjust32角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust32")
+        elif not self.fix32:
+            print("fix32前进补正")
+            self.fix32 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn32:
+            print("turn32直角转弯")
+            self.run_turn(direction="right", duration=3.0, flag="turn32")
         return
 
     # ------------------------ 第三部分（右侧） ----------------------
     def third_part_right(self, rgb, ai):
+        if not self.turn31:
+            print("turn31直角转弯")
+            self.run_turn(direction="right", duration=3.0, flag="turn31")
+        elif not self.straight32:
+            print("straight32直线行驶")
+            self.straight32 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust32:
+            print("adjust32角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust32")
+        elif not self.fix32:
+            print("fix32前进补正")
+            self.fix32 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn32:
+            print("turn32直角转弯")
+            self.run_turn(direction="left", duration=3.0, flag="turn32")
         return
 
     # ----------- 线程级一次性计时器（不依赖 ROS2 Timer） -----------
