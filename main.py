@@ -181,6 +181,9 @@ class PIDController(Node):
         self.fix32 = False
         self.turn32 = False
 
+        self.straight33 = False
+        self.saw_bar = False
+
         # 线程安全：共享帧
         self._lock = threading.RLock()
         self._last_ai_frame: Optional[any] = None
@@ -822,7 +825,33 @@ class PIDController(Node):
         elif not self.turn32:
             print("turn32直角转弯")
             self.run_turn(direction="right", duration=3.0, flag="turn32")
-        return
+        elif not self.straight33:
+            print("straight33直线行驶")
+            """直行一段，支持PID校正和距离触发停止"""
+            if not self.pid_used:
+                self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
+                self.pid_used = True
+            self.motioncontroller.cmd_msg.motion_id = 308
+
+            # 限高杆检测
+            bar_distance = height_bar_check(rgb)
+            if bar_distance < 30 and not self.saw_bar:
+                self.saw_bar = True
+                self.start_flag_timer("saw_bar", 8, False)
+            if self.saw_bar:
+                self.motioncontroller.cmd_msg.step_height = [0.02, 0.02]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.20]
+            else:
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.235]
+
+            deviation = detect_deviation(rgb)
+            correction = 1.5 * self.pid.calculate(0.0, deviation)
+            self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.2 * correction]
+
+        return False
 
     # ------------------------ 第三部分（右侧） ----------------------
     def third_part_right(self, rgb, ai):
@@ -841,7 +870,7 @@ class PIDController(Node):
         elif not self.turn32:
             print("turn32直角转弯")
             self.run_turn(direction="left", duration=3.0, flag="turn32")
-        return
+        return False
 
     # ----------- 线程级一次性计时器（不依赖 ROS2 Timer） -----------
     def start_flag_timer(
