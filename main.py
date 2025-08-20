@@ -117,6 +117,11 @@ class PIDController(Node):
         self.get_ready = False
 
         # 任务阶段
+        self.part1 = False
+        self.part2 = False
+        self.part3 = False
+        self.part3_split = False
+
         # ----------------------- 第一部分 ---------------------------
         self.straight1 = False
         self.turn1 = False
@@ -163,11 +168,16 @@ class PIDController(Node):
 
         # ----------------------- 第三部分 ---------------------------
         self.straight31 = False
+        self.adjust31 = False
         self.arrow_get = False
         self.arrow_result = None
         self.audio_finished3 = False
-        self.adjust31 = False
         self.fix31 = False
+
+        self.turn32 = False
+        self.straight32 = False
+        self.adjust32 = False
+        self.fix32 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -537,219 +547,30 @@ class PIDController(Node):
                     # 机器狗整体初始化中
                     pass
 
-                # ------------------------ 第一部分 -----------------------------
-                # 第一次直线行驶
-                elif not self.straight1:
-                    print("第一次直线行驶")
-                    self.run_straight(rgb, duration=5.0, flag="straight1")
+                # 第一部分
+                elif not self.part1:
+                    self.part1 = self.first_part(rgb, ai)
 
-                # 第一次直角转弯
-                elif not self.turn1:
-                    print("第一次直角转弯")
-                    self.run_turn(direction="right", duration=3.0, flag="turn1")
+                # 第二部分
+                elif not self.part2:
+                    self.part2 = self.second_part(rgb, ai)
 
-                # 第二次直线行驶
-                elif not self.straight2:
-                    print("第二次直线行驶")
-                    self.straight2 = self.run_straight(
-                        rgb, stop_dist=130, ignore_frames=3
-                    )
-
-                # 文本识别段（使用 AI 相机帧 ai）
-                elif self.straight2 and not self.text1_result and ai is not None:
-                    print("第一次文本识别")
-                    # 进入识别序列：先起步抖动2秒，再识别
-                    if self.text1_get:
-                        self.motioncontroller.cmd_msg.motion_id = 308
-                        self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-                        self.motioncontroller.cmd_msg.vel_des = [
-                            (random.random() - 0.5),
-                            0.0,
-                            0.0,
-                        ]
-                    else:
-                        self.motioncontroller.cmd_msg.motion_id = 111
-                        self.text1_result = text_detector(ai)
-                        self.text1_get = True
-                        self.start_flag_timer("text1_get", 2.0, False)
-
-                # 语音播报
-                elif not self.audio_finished:
-                    print(f"识别结果为{self.text1_result}")
-                    play_tts_async(f"识别结果为{self.text1_result}")
-                    self.audio_finished = True
-
-                # 第一次角度调节
-                elif not self.adjust1:
-                    print("第一次角度调节")
-                    self.run_adjust(rgb, duration=3.0, flag="adjust1")
-
-                # 第一次前进补正
-                elif not self.fix1:
-                    print("第一次前进补正")
-                    self.fix1 = self.run_fix(rgb, stop_dist=30)
-
-                elif not self.park1:
-                    # 根据库位选择方向和标志编号
-                    turn_dir = "right" if self.text1_result == "a1" else "left"
-
-                    if not self.turn2:
-                        print("第二次直角转弯")
-                        self.run_turn(direction=turn_dir, duration=3.0, flag="turn2")
-                    elif not self.straight3:
-                        print("第三次直线行驶")
-                        self.straight3 = self.run_straight(
-                            rgb, stop_dist=120, ignore_frames=3
-                        )
-                    elif not self.adjust2:
-                        print("第二次角度调节")
-                        self.run_adjust(rgb, duration=3.0, flag="adjust2")
-                    elif not self.fix2:
-                        print("第二次前进补正")
-                        self.fix2 = self.run_fix(rgb, stop_dist=30)
-                    elif not self.turn3:
-                        print("第三次直角转弯")
-                        self.run_turn(direction=turn_dir, duration=3.0, flag="turn3")
-                    elif not self.straight4:
-                        print("第四次直线行驶")
-                        self.straight4 = self.run_straight(
-                            rgb, stop_dist=120, ignore_frames=3
-                        )
-                    elif not self.adjust3:
-                        print("第三次角度调节")
-                        self.run_adjust(rgb, duration=3.0, flag="adjust3")
-                    elif not self.fix3:
-                        print("第三次前进补正")
-                        self.fix3 = self.run_fix(rgb, stop_dist=30)
-                    elif not self.load_ready1 and ai is not None:
-                        print("等待装载指令")
-                        self.motioncontroller.cmd_msg.motion_id = 101
-                        self.load_ready1 = dark_button(ai)
-                    elif not self.stand_ready1:
-                        print("准备出发")
-                        self.motioncontroller.cmd_msg.motion_id = 111
-                        self.start_flag_timer("stand_ready1", 5.0, True)
-                    elif not self.turn4:
-                        print("原地转向")
-                        self.run_turn(direction=turn_dir, duration=6.0, flag="turn4")
-                    elif not self.straight5:
-                        print("第五次直线行驶")
-                        self.straight5 = self.run_straight(
-                            rgb, stop_dist=120, ignore_frames=3
-                        )
-                    elif not self.adjust4:
-                        print("第四次角度调节")
-                        self.run_adjust(rgb, duration=3.0, flag="adjust4")
-                    elif not self.fix4:
-                        print("第四次前进补正")
-                        self.fix4 = self.run_fix(rgb, stop_dist=30)
-                    elif not self.turn5:
-                        print("第五次直角转弯")
-                        self.run_turn(
-                            direction=("left" if turn_dir == "right" else "right"),
-                            duration=3.0,
-                            flag="turn5",
-                        )
-                    elif not self.straight6:
-                        print("第六次直线行驶")
-                        self.run_straight(rgb, duration=4.5, flag="straight6")
-                    elif not self.turn6:
-                        print("第六次直角转弯")
-                        self.run_turn(
-                            direction=("left" if turn_dir == "right" else "right"),
-                            duration=3.0,
-                            flag="turn6",
-                        )
-                    else:
-                        self.park1 = True
-
-                elif not self.straight7:
-                    print("第七次直线行驶")
-                    self.straight7 = self.run_straight(
-                        rgb, stop_dist=120, ignore_frames=3
-                    )
-                elif not self.adjust5:
-                    print("第五次角度调节")
-                    self.run_adjust(rgb, duration=3.0, flag="adjust5")
-                elif not self.fix5:
-                    print("第五次前进补正")
-                    self.fix5 = self.run_fix(rgb, stop_dist=30)
-                elif not self.turn7:
-                    print("第七次直角转弯")
-                    self.run_turn(direction="right", duration=3.0, flag="turn7")
-
-                # ------------------------ 第二部分 -----------------------------
-                elif not self.S_road1:
-                    print("第一次S弯道")
-                    if not self.pid_used:
-                        self.pid = PID(
-                            kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0)
-                        )
-                        self.pid_used = True
-                        self.turned_angle = 0
-
-                    self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
-                    deviation = detect_deviation(rgb, S_road=True)
-                    # print("偏转角度（度）：", deviation)
-                    correction = self.pid.calculate(0.0, deviation / 90.0)
-                    # print("偏置系数：", correction)
-                    self.motioncontroller.cmd_msg.vel_des = [
-                        0.15 * (1 - correction),
-                        0.0,
-                        0.2 * correction * 4.5,
-                    ]
-                    self.turned_angle += (0.2 * correction * 4.5) / (20.0 * 3 * 0.6)
-                    print("当前角度：", self.turned_angle)
-                    if self.turned_angle > 0.95 and not self.around1:
-                        self.around1 = True
-                    elif self.turned_angle < 0.05 and self.around1 and not self.around2:
-                        self.around2 = True
-                    elif self.turned_angle > 0.95 and self.around2 and not self.around3:
-                        self.around3 = True
-                    elif self.turned_angle < 0.50 and self.around3:
-                        self.S_road1 = True
-
-                # ------------------------ 第三部分 -----------------------------
-                # 第一次直线行驶
-                elif not self.straight31:
-                    print("第一次直线行驶")
-                    self.straight31 = self.run_straight(
-                        rgb, stop_dist=130, ignore_frames=3
-                    )
-
-                # 箭头识别段（使用 AI 相机帧 ai）
-                elif self.straight31 and not self.arrow_result and ai is not None:
-                    print("第一次箭头识别")
-                    # 进入识别序列：先起步抖动2秒，再识别
-                    if self.arrow_get:
-                        self.motioncontroller.cmd_msg.motion_id = 308
-                        self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
-                        self.motioncontroller.cmd_msg.vel_des = [
-                            (random.random() - 0.5),
-                            0.0,
-                            0.0,
-                        ]
-                    else:
-                        self.motioncontroller.cmd_msg.motion_id = 111
-                        self.arrow_result = detect_arrow_direction(ai)
-                        self.arrow_get = True
-                        self.start_flag_timer("arrow_get", 2.0, False)
-
-                # 语音播报
-                elif not self.audio_finished3:
-                    print(f"识别结果为{self.arrow_result}")
-                    play_tts_async(f"识别结果为{self.arrow_result}")
-                    self.audio_finished3 = True
-
-                # 第一次角度调节
-                elif not self.adjust31:
-                    print("第一次角度调节")
-                    self.run_adjust(rgb, duration=3.0, flag="adjust31")
-
-                # 第一次前进补正
-                elif not self.fix31:
-                    print("第一次前进补正")
-                    self.fix31 = self.run_fix(rgb, stop_dist=30)
+                # 第三部分
+                elif not self.part3:
+                    if not self.fix31:
+                        self.third_part(rgb, ai)
+                    if (
+                        self.fix31
+                        and self.arrow_result == "left"
+                        and not self.part3_split
+                    ):
+                        self.part3 = self.third_part_left(rgb, ai)
+                    if (
+                        self.fix31
+                        and self.arrow_result == "right"
+                        and not self.part3_split
+                    ):
+                        self.part3 = self.third_part_right(rgb, ai)
 
                 else:
                     print("程序结束")
@@ -764,6 +585,230 @@ class PIDController(Node):
             elapsed = time.perf_counter() - t0
             sleep_t = max(0.0, dt - elapsed)
             time.sleep(sleep_t)
+
+    # ------------------------ 第一部分 -----------------------------
+    def first_part(self, rgb, ai):
+        # 第一次直线行驶
+        if not self.straight1:
+            print("第一次直线行驶")
+            self.run_straight(rgb, duration=5.0, flag="straight1")
+
+        # 第一次直角转弯
+        elif not self.turn1:
+            print("第一次直角转弯")
+            self.run_turn(direction="right", duration=3.0, flag="turn1")
+
+        # 第二次直线行驶
+        elif not self.straight2:
+            print("第二次直线行驶")
+            self.straight2 = self.run_straight(rgb, stop_dist=130, ignore_frames=3)
+
+        # 文本识别段（使用 AI 相机帧 ai）
+        elif self.straight2 and not self.text1_result and ai is not None:
+            print("第一次文本识别")
+            # 进入识别序列：先起步抖动2秒，再识别
+            if self.text1_get:
+                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                self.motioncontroller.cmd_msg.vel_des = [
+                    (random.random() - 0.5),
+                    0.0,
+                    0.0,
+                ]
+            else:
+                self.motioncontroller.cmd_msg.motion_id = 111
+                self.text1_result = text_detector(ai)
+                self.text1_get = True
+                self.start_flag_timer("text1_get", 2.0, False)
+
+        # 语音播报
+        elif not self.audio_finished:
+            print(f"识别结果为{self.text1_result}")
+            play_tts_async(f"识别结果为{self.text1_result}")
+            self.audio_finished = True
+
+        # 第一次角度调节
+        elif not self.adjust1:
+            print("第一次角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust1")
+
+        # 第一次前进补正
+        elif not self.fix1:
+            print("第一次前进补正")
+            self.fix1 = self.run_fix(rgb, stop_dist=30)
+
+        elif not self.park1:
+            # 根据库位选择方向和标志编号
+            turn_dir = "right" if self.text1_result == "a1" else "left"
+
+            if not self.turn2:
+                print("第二次直角转弯")
+                self.run_turn(direction=turn_dir, duration=3.0, flag="turn2")
+            elif not self.straight3:
+                print("第三次直线行驶")
+                self.straight3 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust2:
+                print("第二次角度调节")
+                self.run_adjust(rgb, duration=3.0, flag="adjust2")
+            elif not self.fix2:
+                print("第二次前进补正")
+                self.fix2 = self.run_fix(rgb, stop_dist=30)
+            elif not self.turn3:
+                print("第三次直角转弯")
+                self.run_turn(direction=turn_dir, duration=3.0, flag="turn3")
+            elif not self.straight4:
+                print("第四次直线行驶")
+                self.straight4 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust3:
+                print("第三次角度调节")
+                self.run_adjust(rgb, duration=3.0, flag="adjust3")
+            elif not self.fix3:
+                print("第三次前进补正")
+                self.fix3 = self.run_fix(rgb, stop_dist=30)
+            elif not self.load_ready1 and ai is not None:
+                print("等待装载指令")
+                self.motioncontroller.cmd_msg.motion_id = 101
+                self.load_ready1 = dark_button(ai)
+            elif not self.stand_ready1:
+                print("准备出发")
+                self.motioncontroller.cmd_msg.motion_id = 111
+                self.start_flag_timer("stand_ready1", 5.0, True)
+            elif not self.turn4:
+                print("原地转向")
+                self.run_turn(direction=turn_dir, duration=6.0, flag="turn4")
+            elif not self.straight5:
+                print("第五次直线行驶")
+                self.straight5 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust4:
+                print("第四次角度调节")
+                self.run_adjust(rgb, duration=3.0, flag="adjust4")
+            elif not self.fix4:
+                print("第四次前进补正")
+                self.fix4 = self.run_fix(rgb, stop_dist=30)
+            elif not self.turn5:
+                print("第五次直角转弯")
+                self.run_turn(
+                    direction=("left" if turn_dir == "right" else "right"),
+                    duration=3.0,
+                    flag="turn5",
+                )
+            elif not self.straight6:
+                print("第六次直线行驶")
+                self.run_straight(rgb, duration=4.5, flag="straight6")
+            elif not self.turn6:
+                print("第六次直角转弯")
+                self.run_turn(
+                    direction=("left" if turn_dir == "right" else "right"),
+                    duration=3.0,
+                    flag="turn6",
+                )
+            else:
+                self.park1 = True
+
+        elif not self.straight7:
+            print("第七次直线行驶")
+            self.straight7 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust5:
+            print("第五次角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust5")
+        elif not self.fix5:
+            print("第五次前进补正")
+            self.fix5 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn7:
+            print("第七次直角转弯")
+            self.run_turn(direction="right", duration=3.0, flag="turn7")
+        return self.turn7
+
+    # ------------------------ 第二部分 -----------------------------
+    def second_part(self, rgb, ai):
+        if not self.S_road1:
+            print("第一次S弯道")
+            if not self.pid_used:
+                self.pid = PID(kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0))
+                self.pid_used = True
+                self.turned_angle = 0
+
+            self.motioncontroller.cmd_msg.motion_id = 308
+            self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+            self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+            deviation = detect_deviation(rgb, S_road=True)
+            # print("偏转角度（度）：", deviation)
+            correction = self.pid.calculate(0.0, deviation / 90.0)
+            # print("偏置系数：", correction)
+            self.motioncontroller.cmd_msg.vel_des = [
+                0.15 * (1 - correction),
+                0.0,
+                0.2 * correction * 4.5,
+            ]
+            self.turned_angle += (0.2 * correction * 4.5) / (20.0 * 3 * 0.6)
+            print("当前角度：", self.turned_angle)
+            if self.turned_angle > 0.80 and not self.around1:
+                print("around1 finished")
+                self.around1 = True
+            elif self.turned_angle < 0.20 and self.around1 and not self.around2:
+                print("around2 finished")
+                self.around2 = True
+            elif self.turned_angle > 0.80 and self.around2 and not self.around3:
+                print("around3 finished")
+                self.around3 = True
+            elif self.turned_angle > 0.50 and self.around3:
+                print("固定转弯")
+                self.motioncontroller.cmd_msg.vel_des = [0.1, 0.5]
+            elif self.turned_angle < 0.50 and self.around3:
+                print("S_road1 finished")
+                self.S_road1 = True
+        return self.S_road1
+
+    # ------------------------ 第三部分 -----------------------------
+    def third_part(self, rgb, ai):
+        # 第一次直线行驶
+        if not self.straight31:
+            print("第一次直线行驶")
+            self.straight31 = self.run_straight(rgb, stop_dist=130, ignore_frames=3)
+
+        # 第一次角度调节
+        elif not self.adjust31:
+            print("第一次角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust31")
+
+        # 箭头识别段（使用 AI 相机帧 ai）
+        elif self.straight31 and not self.arrow_result and ai is not None:
+            print("第一次箭头识别")
+            # 进入识别序列：先起步抖动2秒，再识别
+            if self.arrow_get:
+                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                self.motioncontroller.cmd_msg.vel_des = [
+                    (random.random() - 0.5),
+                    0.0,
+                    0.0,
+                ]
+            else:
+                self.motioncontroller.cmd_msg.motion_id = 111
+                self.arrow_result = detect_arrow_direction(ai)
+                self.arrow_get = True
+                self.start_flag_timer("arrow_get", 2.0, False)
+
+        # 语音播报
+        elif not self.audio_finished3:
+            print(f"识别结果为{self.arrow_result}")
+            play_tts_async(f"识别结果为{self.arrow_result}")
+            self.audio_finished3 = True
+
+        # 第一次前进补正
+        elif not self.fix31:
+            print("第一次前进补正")
+            self.fix31 = self.run_fix(rgb, stop_dist=30)
+
+        return self.fix31
+
+    # ------------------------ 第三部分（左侧） ----------------------
+    def third_part_left(self, rgb, ai):
+        return
+
+    # ------------------------ 第三部分（右侧） ----------------------
+    def third_part_right(self, rgb, ai):
+        return
 
     # ----------- 线程级一次性计时器（不依赖 ROS2 Timer） -----------
     def start_flag_timer(
