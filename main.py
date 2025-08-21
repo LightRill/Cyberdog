@@ -192,6 +192,36 @@ class PIDController(Node):
         self.text3_get = False
         self.text3_result = None
         self.audio_finished3 = False
+        self.park3 = False
+
+        self.turn33 = False
+        self.straight34 = False
+        self.adjust34 = False
+        self.fix34 = False
+
+        self.turn34 = False
+        self.straight35 = False
+        self.adjust35 = False
+        self.fix35 = False
+
+        self.load_ready3 = False
+        self.stand_ready3 = False
+        self.turn35 = False
+
+        self.straight36 = False
+        self.turn36 = False
+        self.straight37 = False
+        self.adjust37 = False
+        self.fix37 = False
+
+        self.turn37 = False
+        self.straight38 = False
+        self.adjust38 = False
+        self.fix38 = False
+
+        self.load_ready32 = False
+        self.stand_ready32 = False
+        self.turn38 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -574,16 +604,16 @@ class PIDController(Node):
                 elif not self.part3:
                     if not self.fix31:
                         self.third_part(rgb, ai)
-                    elif (
-                        self.fix31 and self.arrow_result == "left" and not self.horizon3
-                    ):
-                        self.third_part_left(rgb, ai)
-                    elif (
-                        self.fix31
-                        and self.arrow_result == "right"
-                        and not self.horizon3
-                    ):
-                        self.part3 = self.third_part_right(rgb, ai)
+                    elif self.fix31 and self.arrow_result and not self.horizon3:
+                        if self.arrow_result == "left":
+                            self.third_part_left(rgb, ai)
+                        else:
+                            self.third_part_right(rgb, ai)
+                    elif self.horizon3 and self.text3_result and not self.park3:
+                        if self.text3_result == "left":
+                            self.part3 = self.third_part_left(rgb, ai)
+                        else:
+                            self.part3 = self.third_part_right(rgb, ai)
 
                 else:
                     print("程序结束")
@@ -776,12 +806,12 @@ class PIDController(Node):
     def third_part(self, rgb, ai):
         # 第一次直线行驶
         if not self.straight31:
-            print("第一次直线行驶")
+            print("straight31直线行驶")
             self.straight31 = self.run_straight(rgb, stop_dist=150, ignore_frames=3)
 
         # 第一次角度调节
         elif not self.adjust31:
-            print("第一次角度调节")
+            print("adjust31角度调节")
             self.run_adjust(rgb, duration=3.0, flag="adjust31")
 
         # 箭头识别段（使用 AI 相机帧 ai）
@@ -859,11 +889,13 @@ class PIDController(Node):
                 self.saw_bar = True
                 self.start_flag_timer("saw_bar", 5, False)
             if self.saw_bar:
-                self.motioncontroller.cmd_msg.motion_id = 111
+                self.motioncontroller.cmd_msg.step_height = [0.02, 0.02]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.2]
             else:
-                self.motioncontroller.cmd_msg.motion_id = 308
                 self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
                 self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.235]
 
             deviation = detect_deviation(rgb)
             correction = 1.5 * self.pid.calculate(0.0, deviation)
@@ -982,6 +1014,67 @@ class PIDController(Node):
             print(f"B区域库位{self.text3_result[-1]}")
             play_tts_async(f"识别结果为{self.text3_result}")
             self.audio_finished3 = True
+
+        elif not self.park2:
+            # 根据库位选择方向和标志编号
+            turn_dir = "left" if self.text2_result == "b1" else "right"
+
+            if not self.turn33:
+                self.run_turn(direction=turn_dir, duration=3.0, flag="turn33")
+            elif not self.straight34:
+                self.straight34 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust34:
+                self.run_adjust(rgb, duration=3.0, flag="adjust34")
+            elif not self.fix34:
+                self.fix34 = self.run_fix(rgb, stop_dist=30)
+            elif not self.turn34:
+                self.run_turn(
+                    direction="right" if self.text2_result == "b1" else "left",
+                    duration=3.0,
+                    flag="turn34",
+                )
+            elif not self.straight35:
+                self.straight35 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust35:
+                self.run_adjust(rgb, duration=3.0, flag="adjust35")
+            elif not self.fix35:
+                self.fix35 = self.run_fix(rgb, stop_dist=30)
+            elif not self.load_ready3 and ai is not None:
+                self.motioncontroller.cmd_msg.motion_id = 101
+                self.load_ready3 = dark_button(ai)
+            elif not self.stand_ready3:
+                self.motioncontroller.cmd_msg.motion_id = 111
+                self.start_flag_timer("stand_ready3", 5.0, True)
+            elif not self.turn35:
+                self.run_turn(direction=turn_dir, duration=6.0, flag="turn35")
+            elif not self.straight36:
+                self.run_straight(rgb, duration=4.8, flag="straight36")
+            elif not self.turn36:
+                self.run_turn(direction=turn_dir, duration=3.0, flag="turn36")
+            elif not self.straight37:
+                self.straight37 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust37:
+                self.run_adjust(rgb, duration=3.0, flag="adjust37")
+            elif not self.fix37:
+                self.fix37 = self.run_fix(rgb, stop_dist=30)
+            elif not self.turn37:
+                self.run_turn(direction=turn_dir, duration=3.0, flag="turn37")
+            elif not self.straight38:
+                self.straight38 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+            elif not self.adjust38:
+                self.run_adjust(rgb, duration=3.0, flag="adjust38")
+            elif not self.fix38:
+                self.fix38 = self.run_fix(rgb, stop_dist=30)
+            elif not self.load_ready32 and ai is not None:
+                self.motioncontroller.cmd_msg.motion_id = 101
+                self.load_ready32 = dark_button(ai)
+            elif not self.stand_ready32:
+                self.motioncontroller.cmd_msg.motion_id = 111
+                self.start_flag_timer("stand_ready32", 5.0, True)
+            elif not self.turn38:
+                self.run_turn(direction=turn_dir, duration=6.0, flag="turn38")
+            else:
+                self.park1 = True
 
     # ------------------------ 第三部分（左侧返回） ----------------------
     def third_part_return_left(self, rgb, ai):
