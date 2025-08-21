@@ -174,7 +174,7 @@ class PIDController(Node):
         self.adjust31 = False
         self.arrow_get = False
         self.arrow_result = None
-        self.audio_finished3 = False
+        self.audio_finished31 = False
         self.fix31 = False
 
         self.turn31 = False
@@ -185,14 +185,15 @@ class PIDController(Node):
 
         self.straight33 = False
         self.saw_bar = False
-        self.counter = [False] * 5
+        self.counter = 5
+        self.counter_audio = False
         self.adjust33 = False
         self.fix33 = False
         self.horizon3 = False
 
         self.text3_get = False
         self.text3_result = None
-        self.audio_finished3 = False
+        self.audio_finished32 = False
         self.park3 = False
 
         self.turn33 = False
@@ -680,9 +681,9 @@ class PIDController(Node):
                         self.third_part_qrcode_text_check(rgb, ai)
                     elif not self.horizon32:
                         if self.arrow_result == "left":
-                            self.third_part_return_right(rgb, ai)
+                            self.part3 = self.third_part_return_right(rgb, ai)
                         else:
-                            self.third_part_return_left(rgb, ai)
+                            self.part3 = self.third_part_return_left(rgb, ai)
 
                 # 第四部分
                 elif not self.part4:
@@ -910,11 +911,11 @@ class PIDController(Node):
                 self.start_flag_timer("arrow_get", 2.0, False)
 
         # 语音播报
-        elif not self.audio_finished3:
+        elif not self.audio_finished31:
             text = "左侧路线" if self.arrow_result == "left" else "右侧路线"
             print(f"识别结果为{self.arrow_result}")
             play_tts_async(text)
-            self.audio_finished3 = True
+            self.audio_finished31 = True
 
         # 第一次前进补正
         elif not self.fix31:
@@ -1017,7 +1018,8 @@ class PIDController(Node):
             if not self.pid_used:
                 self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
                 self.pid_used = True
-                self.counter = [False] * 5
+                self.counter = 5
+                self.counter_audio = False
             if not self.distance_detector_used:
                 self.distance_detector = LineDistanceDetector(
                     roi_width=20, smooth_window=5, ignore_frames=3, detect_pink=True
@@ -1025,7 +1027,7 @@ class PIDController(Node):
                 self.distance_detector_used = True
             distance = self.distance_detector.detect_line_distance(rgb)
             print("距离底线距离为：", distance)
-            if distance < 130:
+            if distance < 120:
                 self.distance_detector_used = False
                 self.pid_used = False
                 self.straight33 = True
@@ -1035,14 +1037,14 @@ class PIDController(Node):
             light_distance = yellow_light_check(rgb)
             if light_distance > 0 and light_distance < 50 and not self.saw_bar:
                 print("检测到黄灯")
-                self.counter[-1] = True
+                self.counter_audio = True
                 self.saw_bar = True
-            if self.counter and self.saw_bar:
+            if self.counter and self.counter_audio and self.saw_bar:
                 self.motioncontroller.cmd_msg.motion_id = 111
-                if self.counter[-1]:
-                    play_tts_async(len(self.counter))
-                    self.counter.pop()
-                    self.start_flag_timer("counter[-1]", 1.0, True)
+                play_tts_async(self.counter)
+                self.counter -= 1
+                self.counter_audio = False
+                self.start_flag_timer("counter_audio", 1.0, True)
 
             else:
                 self.motioncontroller.cmd_msg.motion_id = 308
@@ -1073,7 +1075,7 @@ class PIDController(Node):
         if self.horizon3 and not self.text3_result and ai is not None:
             print("第二次文本识别")
             # 进入识别序列：先起步抖动2秒，再识别
-            if self.text1_get:
+            if self.text3_get:
                 self.motioncontroller.cmd_msg.motion_id = 308
                 self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
                 self.motioncontroller.cmd_msg.vel_des = [
@@ -1088,14 +1090,14 @@ class PIDController(Node):
                 self.start_flag_timer("text3_get", 2.0, False)
 
         # 语音播报
-        elif not self.audio_finished3:
+        elif not self.audio_finished32:
             print(f"B区域库位{self.text3_result[-1]}")
             play_tts_async(f"识别结果为{self.text3_result}")
-            self.audio_finished3 = True
+            self.audio_finished32 = True
 
-        elif not self.park2:
+        elif not self.park3:
             # 根据库位选择方向和标志编号
-            turn_dir = "left" if self.text2_result == "b1" else "right"
+            turn_dir = "left" if self.text3_result == "b1" else "right"
 
             if not self.turn33:
                 self.run_turn(direction=turn_dir, duration=3.0, flag="turn33")
@@ -1107,7 +1109,7 @@ class PIDController(Node):
                 self.fix34 = self.run_fix(rgb, stop_dist=30)
             elif not self.turn34:
                 self.run_turn(
-                    direction="right" if self.text2_result == "b1" else "left",
+                    direction="right" if self.text3_result == "b1" else "left",
                     duration=3.0,
                     flag="turn34",
                 )
@@ -1178,7 +1180,7 @@ class PIDController(Node):
             bar_distance = height_bar_check(rgb)
             if bar_distance > 0 and bar_distance < 30 and not self.saw_bar32:
                 print("检测到限高杆")
-                self.saw_bar = True
+                self.saw_bar32 = True
                 self.start_flag_timer("saw_bar32", 5, False)
             if self.saw_bar32:
                 self.motioncontroller.cmd_msg.step_height = [0.02, 0.02]
@@ -1208,6 +1210,8 @@ class PIDController(Node):
             self.motioncontroller.cmd_msg.vel_des = [0.0, 0.2, 0.0]
             self.start_flag_timer("horizon32", 4.0, True)
 
+        return self.horizon32
+
     # ------------------------ 第三部分（右侧返回） ----------------------
     def third_part_return_right(self, rgb, ai):
         if not self.straight39:
@@ -1215,7 +1219,8 @@ class PIDController(Node):
             if not self.pid_used:
                 self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
                 self.pid_used = True
-                self.counter = [False] * 5
+                self.counter = 5
+                self.counter_audio = False
             if not self.distance_detector_used:
                 self.distance_detector = LineDistanceDetector(
                     roi_width=20, smooth_window=5, ignore_frames=3
@@ -1233,14 +1238,14 @@ class PIDController(Node):
             light_distance = yellow_light_check(rgb)
             if light_distance > 0 and light_distance < 50 and not self.saw_bar32:
                 print("检测到黄灯")
-                self.counter[-1] = True
+                self.counter_audio = True
                 self.saw_bar32 = True
-            if self.counter and self.saw_bar32:
+            if self.counter and self.counter_audio and self.saw_bar32:
                 self.motioncontroller.cmd_msg.motion_id = 111
-                if self.counter[-1]:
-                    play_tts_async(len(self.counter))
-                    self.counter.pop()
-                    self.start_flag_timer("counter[-1]", 1.0, True)
+                play_tts_async(self.counter)
+                self.counter -= 1
+                self.counter_audio = False
+                self.start_flag_timer("counter_audio", 1.0, True)
 
             else:
                 self.motioncontroller.cmd_msg.motion_id = 308
@@ -1264,6 +1269,8 @@ class PIDController(Node):
             self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
             self.motioncontroller.cmd_msg.vel_des = [0.0, 0.2, 0.0]
             self.start_flag_timer("horizon32", 4.0, True)
+
+        return self.horizon32
 
     # ------------------------ 第四部分 -----------------------------
     def forth_part(self, rgb, ai):
@@ -1300,7 +1307,7 @@ class PIDController(Node):
             ):
                 print("around42 finished")
                 self.around42 = True
-            elif self.turned_angle < -self.peak2 * 0.80 and self.around2:
+            elif self.turned_angle < -self.peak2 * 0.80 and self.around42:
                 print("S_road2 finished")
                 self.S_road2 = True
         return self.S_road2
