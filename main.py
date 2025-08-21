@@ -122,6 +122,8 @@ class PIDController(Node):
         self.part1 = False
         self.part2 = False
         self.part3 = False
+        self.part4 = False
+        self.part5 = False
 
         # ----------------------- 第一部分 ---------------------------
         self.straight1 = False
@@ -166,7 +168,6 @@ class PIDController(Node):
         self.peak1 = 0
         self.around1 = False
         self.around2 = False
-        self.around3 = False
 
         # ----------------------- 第三部分 ---------------------------
         self.straight31 = False
@@ -222,6 +223,60 @@ class PIDController(Node):
         self.load_ready32 = False
         self.stand_ready32 = False
         self.turn38 = False
+
+        self.saw_bar32 = False
+        self.straight39 = False
+        self.adjust39 = False
+        self.fix39 = False
+        self.horizon32 = False
+
+        # ----------------------- 第四部分 ---------------------------
+        self.S_road2 = False
+        self.peak2 = 0
+        self.around41 = False
+        self.around42 = False
+
+        # ----------------------- 第五部分 ---------------------------
+        self.straight51 = False
+        self.adjust51 = False
+        self.fix51 = False
+        self.turn51 = False
+
+        self.straight52 = False
+        self.adjust52 = False
+        self.fix52 = False
+        self.turn52 = False
+
+        self.straight53 = False
+        self.adjust53 = False
+        self.fix53 = False
+        self.turn53 = False
+
+        self.straight54 = False
+        self.adjust54 = False
+        self.fix54 = False
+
+        self.load_ready5 = False
+        self.stand_ready5 = False
+        self.turn54 = False
+
+        self.straight55 = False
+        self.adjust55 = False
+        self.fix55 = False
+        self.turn55 = False
+
+        self.straight56 = False
+        self.turn56 = False
+
+        self.straight57 = False
+        self.adjust57 = False
+        self.fix57 = False
+        self.turn57 = False
+
+        self.straight58 = False
+        self.adjust58 = False
+        self.fix58 = False
+        self.turn58 = False
 
         # 线程安全：共享帧
         self._lock = threading.RLock()
@@ -517,7 +572,9 @@ class PIDController(Node):
         self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, yaw_speed]
         self.start_flag_timer(flag, duration, True)
 
-    def run_adjust(self, rgb, duration=3.0, flag="adjustX", detect_pink=False):
+    def run_adjust(
+        self, rgb, duration=3.0, flag="adjustX", detect_pink=False, detect_purple=False
+    ):
         """角度调整"""
         if not self.pid_used:
             self.pid = PID(kp=0.6, ki=0.0, kd=0.4, output_limits=(-1.0, 1.0))
@@ -525,14 +582,23 @@ class PIDController(Node):
         self.start_flag_timer("pid_used", duration, False)
         self.start_flag_timer(flag, duration, True)
 
-        deviation = compute_line_offset(rgb, detect_pink=detect_pink)
+        deviation = compute_line_offset(
+            rgb, detect_pink=detect_pink, detect_purple=detect_purple
+        )
         correction = self.pid.calculate(0.0, deviation)
         self.motioncontroller.cmd_msg.motion_id = 308
         self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
         self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
         self.motioncontroller.cmd_msg.vel_des = [0.0, 0.0, 0.1 * correction]
 
-    def run_fix(self, rgb, stop_dist=30, ignore_frames=0, detect_pink=False):
+    def run_fix(
+        self,
+        rgb,
+        stop_dist=30,
+        ignore_frames=0,
+        detect_pink=False,
+        detect_purple=False,
+    ):
         """前进补正，靠距离触发"""
         if not self.distance_detector_used:
             self.distance_detector = LineDistanceDetector(
@@ -541,6 +607,7 @@ class PIDController(Node):
                 ignore_frames=ignore_frames,
                 jump_threshold=20,
                 detect_pink=detect_pink,
+                detect_purple=detect_purple,
             )
             self.distance_detector_used = True
         self.motioncontroller.cmd_msg.motion_id = 308
@@ -604,16 +671,26 @@ class PIDController(Node):
                 elif not self.part3:
                     if not self.fix31:
                         self.third_part(rgb, ai)
-                    elif self.fix31 and self.arrow_result and not self.horizon3:
+                    elif self.arrow_result and not self.horizon3:
                         if self.arrow_result == "left":
                             self.third_part_left(rgb, ai)
                         else:
                             self.third_part_right(rgb, ai)
-                    elif self.horizon3 and self.text3_result and not self.park3:
-                        if self.text3_result == "left":
-                            self.part3 = self.third_part_left(rgb, ai)
+                    elif self.text3_result and not self.park3:
+                        self.third_part_qrcode_text_check(rgb, ai)
+                    elif not self.horizon32:
+                        if self.arrow_result == "left":
+                            self.third_part_return_right(rgb, ai)
                         else:
-                            self.part3 = self.third_part_right(rgb, ai)
+                            self.third_part_return_left(rgb, ai)
+
+                # 第四部分
+                elif not self.part4:
+                    self.part4 = self.forth_part(rgb, ai)
+
+                # 第五部分
+                elif not self.part5:
+                    self.part5 = self.fifth_part(rgb, ai)
 
                 else:
                     print("程序结束")
@@ -876,7 +953,7 @@ class PIDController(Node):
                 self.distance_detector_used = True
             distance = self.distance_detector.detect_line_distance(rgb)
             print("距离底线距离为：", distance)
-            if distance < 130:
+            if distance < 120:
                 self.distance_detector_used = False
                 self.pid_used = False
                 self.straight33 = True
@@ -940,6 +1017,7 @@ class PIDController(Node):
             if not self.pid_used:
                 self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
                 self.pid_used = True
+                self.counter = [False] * 5
             if not self.distance_detector_used:
                 self.distance_detector = LineDistanceDetector(
                     roi_width=20, smooth_window=5, ignore_frames=3, detect_pink=True
@@ -1078,41 +1156,274 @@ class PIDController(Node):
 
     # ------------------------ 第三部分（左侧返回） ----------------------
     def third_part_return_left(self, rgb, ai):
-        if not self.turn31:
-            print("turn31直角转弯")
-            self.run_turn(direction="right", duration=3.0, flag="turn31")
-        elif not self.straight32:
-            print("straight32直线行驶")
-            self.straight32 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
-        elif not self.adjust32:
-            print("adjust32角度调节")
-            self.run_adjust(rgb, duration=3.0, flag="adjust32")
-        elif not self.fix32:
-            print("fix32前进补正")
-            self.fix32 = self.run_fix(rgb, stop_dist=30)
-        elif not self.turn32:
-            print("turn32直角转弯")
-            self.run_turn(direction="left", duration=3.0, flag="turn32")
-        return False
+        if not self.straight39:
+            print("straight39直线行驶")
+            if not self.pid_used:
+                self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
+                self.pid_used = True
+            if not self.distance_detector_used:
+                self.distance_detector = LineDistanceDetector(
+                    roi_width=20, smooth_window=5, ignore_frames=3
+                )
+                self.distance_detector_used = True
+            distance = self.distance_detector.detect_line_distance(rgb)
+            print("距离底线距离为：", distance)
+            if distance < 120:
+                self.distance_detector_used = False
+                self.pid_used = False
+                self.straight39 = True
+            self.motioncontroller.cmd_msg.motion_id = 308
+
+            # 限高杆检测
+            bar_distance = height_bar_check(rgb)
+            if bar_distance > 0 and bar_distance < 30 and not self.saw_bar32:
+                print("检测到限高杆")
+                self.saw_bar = True
+                self.start_flag_timer("saw_bar32", 5, False)
+            if self.saw_bar32:
+                self.motioncontroller.cmd_msg.step_height = [0.02, 0.02]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.2]
+            else:
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.235]
+
+            deviation = detect_deviation(rgb)
+            correction = 1.5 * self.pid.calculate(0.0, deviation)
+            self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.2 * correction]
+
+        elif not self.adjust39:
+            print("adjust39角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust39")
+        elif not self.fix39:
+            print("fix39前进补正")
+            self.fix39 = self.run_fix(rgb, stop_dist=30)
+
+        elif not self.horizon32:
+            print("horizon32横向移动")
+            self.motioncontroller.cmd_msg.motion_id = 308
+            self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+            self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+            self.motioncontroller.cmd_msg.vel_des = [0.0, 0.2, 0.0]
+            self.start_flag_timer("horizon32", 4.0, True)
 
     # ------------------------ 第三部分（右侧返回） ----------------------
     def third_part_return_right(self, rgb, ai):
-        if not self.turn31:
-            print("turn31直角转弯")
-            self.run_turn(direction="right", duration=3.0, flag="turn31")
-        elif not self.straight32:
-            print("straight32直线行驶")
-            self.straight32 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
-        elif not self.adjust32:
-            print("adjust32角度调节")
-            self.run_adjust(rgb, duration=3.0, flag="adjust32")
-        elif not self.fix32:
-            print("fix32前进补正")
-            self.fix32 = self.run_fix(rgb, stop_dist=30)
-        elif not self.turn32:
-            print("turn32直角转弯")
-            self.run_turn(direction="left", duration=3.0, flag="turn32")
-        return False
+        if not self.straight39:
+            print("straight39直线行驶")
+            if not self.pid_used:
+                self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
+                self.pid_used = True
+                self.counter = [False] * 5
+            if not self.distance_detector_used:
+                self.distance_detector = LineDistanceDetector(
+                    roi_width=20, smooth_window=5, ignore_frames=3
+                )
+                self.distance_detector_used = True
+            distance = self.distance_detector.detect_line_distance(rgb)
+            print("距离底线距离为：", distance)
+            if distance < 120:
+                self.distance_detector_used = False
+                self.pid_used = False
+                self.straight39 = True
+            self.motioncontroller.cmd_msg.motion_id = 308
+
+            # 黄灯检测
+            light_distance = yellow_light_check(rgb)
+            if light_distance > 0 and light_distance < 50 and not self.saw_bar32:
+                print("检测到黄灯")
+                self.counter[-1] = True
+                self.saw_bar32 = True
+            if self.counter and self.saw_bar32:
+                self.motioncontroller.cmd_msg.motion_id = 111
+                if self.counter[-1]:
+                    play_tts_async(len(self.counter))
+                    self.counter.pop()
+                    self.start_flag_timer("counter[-1]", 1.0, True)
+
+            else:
+                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+
+            deviation = detect_deviation(rgb)
+            correction = 1.5 * self.pid.calculate(0.0, deviation)
+            self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.2 * correction]
+
+        elif not self.adjust39:
+            print("adjust39角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust39")
+        elif not self.fix39:
+            print("fix39前进补正")
+            self.fix39 = self.run_fix(rgb, stop_dist=30, detect_pink=True)
+
+        elif not self.horizon32:
+            print("horizon32横向移动")
+            self.motioncontroller.cmd_msg.motion_id = 308
+            self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+            self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
+            self.motioncontroller.cmd_msg.vel_des = [0.0, 0.2, 0.0]
+            self.start_flag_timer("horizon32", 4.0, True)
+
+    # ------------------------ 第四部分 -----------------------------
+    def forth_part(self, rgb, ai):
+        if not self.S_road2:
+            print("第二次S弯道")
+            if not self.pid_used:
+                self.pid = PID(kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0))
+                self.pid_used = True
+                self.turned_angle = 0
+                self.peak2 = 0
+
+            self.motioncontroller.cmd_msg.motion_id = 308
+            self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+            self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
+            deviation = detect_deviation(rgb, S_road=True)
+            # print("偏转角度（度）：", deviation)
+            correction = self.pid.calculate(0.0, deviation / 90.0)
+            # print("偏置系数：", correction)
+            self.motioncontroller.cmd_msg.vel_des = [
+                0.15 * (1 - correction),
+                0.0,
+                0.2 * correction * 3.5,
+            ]
+            self.turned_angle += 0.2 * correction * 4.5
+            self.peak2 = max(self.peak2, self.turned_angle)
+            print("当前角度：", self.turned_angle / self.peak2)
+            if self.turned_angle < self.peak2 * 0.00 and not self.around41:
+                print("around41 finished")
+                self.around41 = True
+            elif (
+                self.turned_angle > self.peak2 * 0.00
+                and self.around41
+                and not self.around42
+            ):
+                print("around42 finished")
+                self.around42 = True
+            elif self.turned_angle < -self.peak2 * 0.80 and self.around2:
+                print("S_road2 finished")
+                self.S_road2 = True
+        return self.S_road2
+
+    # ------------------------ 第五部分 -----------------------------
+    def fifth_part(self, rgb, ai):
+        turn_dir = "left" if self.text1_result == "a1" else "right"
+        if not self.straight51:
+            print("straight51 直线行驶")
+            self.straight51 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust51:
+            print("adjust51 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust51", detect_purple=True)
+        elif not self.fix51:
+            print("fix51 前进补正")
+            self.fix51 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn51:
+            print("turn51 直角转弯")
+            self.run_turn(direction=turn_dir, duration=3.0, flag="turn51")
+
+        elif not self.straight52:
+            print("straight52 直线行驶")
+            self.straight52 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust52:
+            print("adjust52 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust52")
+        elif not self.fix52:
+            print("fix52 前进补正")
+            self.fix52 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn52:
+            print("turn52 直角转弯")
+            self.run_turn(direction=turn_dir, duration=3.0, flag="turn52")
+
+        elif not self.straight53:
+            print("straight53 直线行驶")
+            self.straight53 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust53:
+            print("adjust53 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust53")
+        elif not self.fix53:
+            print("fix53 前进补正")
+            self.fix53 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn53:
+            print("turn53 直角转弯")
+            self.run_turn(direction=turn_dir, duration=3.0, flag="turn53")
+
+        elif not self.straight54:
+            print("straight54 直线行驶")
+            self.straight54 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust54:
+            print("adjust54 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust54")
+        elif not self.fix54:
+            print("fix54 前进补正")
+            self.fix54 = self.run_fix(rgb, stop_dist=30)
+
+        elif not self.load_ready5 and ai is not None:
+            print("等待装载指令")
+            self.motioncontroller.cmd_msg.motion_id = 101
+            self.load_ready5 = dark_button(ai)
+        elif not self.stand_ready5:
+            print("准备出发")
+            self.motioncontroller.cmd_msg.motion_id = 111
+            self.start_flag_timer("stand_ready5", 5.0, True)
+        elif not self.turn54:
+            print("turn54 转向")
+            self.run_turn(direction=turn_dir, duration=6.0, flag="turn54")
+
+        elif not self.straight55:
+            print("straight55 直线行驶")
+            self.straight55 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust55:
+            print("adjust55 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust55")
+        elif not self.fix55:
+            print("fix55 前进补正")
+            self.fix55 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn55:
+            print("turn55 转向")
+            self.run_turn(
+                direction="right" if self.text1_result == "a1" else "left",
+                duration=6.0,
+                flag="turn55",
+            )
+
+        elif not self.straight56:
+            print("straight56 直线行驶")
+            self.run_straight(rgb, duration=4.5, flag="straight56")
+        elif not self.turn56:
+            print("turn56 直角转弯")
+            self.run_turn(
+                direction="right" if self.text1_result == "a1" else "left",
+                duration=3.0,
+                flag="turn56",
+            )
+
+        elif not self.straight57:
+            print("straight57 直线行驶")
+            self.straight57 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust57:
+            print("adjust57 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust57")
+        elif not self.fix57:
+            print("fix57 前进补正")
+            self.fix57 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn57:
+            print("turn57 转向")
+            self.run_turn(direction="left", duration=3.0, flag="turn57")
+
+        elif not self.straight58:
+            print("straight58 直线行驶")
+            self.straight58 = self.run_straight(rgb, stop_dist=120, ignore_frames=3)
+        elif not self.adjust58:
+            print("adjust58 角度调节")
+            self.run_adjust(rgb, duration=3.0, flag="adjust58")
+        elif not self.fix58:
+            print("fix58 前进补正")
+            self.fix58 = self.run_fix(rgb, stop_dist=30)
+        elif not self.turn58:
+            print("turn58 转向")
+            self.run_turn(direction="left", duration=6.0, flag="turn58")
+
+        return self.turn58
 
     # ----------- 线程级一次性计时器（不依赖 ROS2 Timer） -----------
     def start_flag_timer(

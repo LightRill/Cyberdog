@@ -1,11 +1,5 @@
 import cv2
 import numpy as np
-
-from collections import deque
-
-
-import cv2
-import numpy as np
 from collections import deque
 
 
@@ -17,6 +11,7 @@ class LineDistanceDetector:
         jump_threshold=None,
         ignore_frames=0,
         detect_pink=False,
+        detect_purple=False,
     ):
         self.roi_width = roi_width
         self.smooth_window = smooth_window
@@ -25,7 +20,8 @@ class LineDistanceDetector:
         self.jump_threshold = jump_threshold
         self.ignore_frames = ignore_frames
         self.cur_frame = 0
-        self.detect_pink = detect_pink  # 新增参数
+        self.detect_pink = detect_pink
+        self.detect_purple = detect_purple
 
     def _get_mask(self, hsv):
         # 黄色阈值
@@ -40,11 +36,18 @@ class LineDistanceDetector:
             mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
             mask = cv2.bitwise_or(mask, mask_pink)
 
+        if self.detect_purple:
+            # 紫色阈值
+            lower_purple = np.array([120, 50, 100])
+            upper_purple = np.array([150, 255, 255])
+            mask_purple = cv2.inRange(hsv, lower_purple, upper_purple)
+            mask = cv2.bitwise_or(mask, mask_purple)
+
         return mask
 
     def detect_line_distance(self, image):
         """
-        检测图像中黄色/粉色线条距离底部的距离。
+        检测图像中黄色/粉色/紫色线条距离底部的距离。
         """
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = self._get_mask(hsv)
@@ -90,7 +93,7 @@ class LineDistanceDetector:
         return result
 
 
-def compute_line_offset(image, detect_pink=False):
+def compute_line_offset(image, detect_pink=False, detect_purple=False):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     # 黄色阈值
@@ -104,6 +107,13 @@ def compute_line_offset(image, detect_pink=False):
         upper_pink = np.array([170, 255, 255])
         mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
         mask = cv2.bitwise_or(mask, mask_pink)
+
+    if detect_purple:
+        # 紫色阈值
+        lower_purple = np.array([120, 50, 100])
+        upper_purple = np.array([150, 255, 255])
+        mask_purple = cv2.inRange(hsv, lower_purple, upper_purple)
+        mask = cv2.bitwise_or(mask, mask_purple)
 
     height, width = mask.shape
     mid_x = width // 2
