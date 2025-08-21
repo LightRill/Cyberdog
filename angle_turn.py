@@ -11,7 +11,12 @@ from collections import deque
 
 class LineDistanceDetector:
     def __init__(
-        self, roi_width=20, smooth_window=5, jump_threshold=None, ignore_frames=0
+        self,
+        roi_width=20,
+        smooth_window=5,
+        jump_threshold=None,
+        ignore_frames=0,
+        detect_pink=False,
     ):
         self.roi_width = roi_width
         self.smooth_window = smooth_window
@@ -20,19 +25,29 @@ class LineDistanceDetector:
         self.jump_threshold = jump_threshold
         self.ignore_frames = ignore_frames
         self.cur_frame = 0
+        self.detect_pink = detect_pink  # 新增参数
 
-    def detect_line_distance(self, image):
-        """
-        检测图像中黄色线条距离底部的距离，使用竖带质心法并平滑输出。
-        如果与上次结果跳变过大，则返回 0。
-        :param image: BGR图像
-        :return: 平滑后的距离（像素）或 0
-        """
-
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    def _get_mask(self, hsv):
+        # 黄色阈值
         lower_yellow = np.array([20, 100, 100])
         upper_yellow = np.array([30, 255, 255])
         mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+        if self.detect_pink:
+            # 粉色阈值
+            lower_pink = np.array([140, 50, 100])
+            upper_pink = np.array([170, 255, 255])
+            mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
+            mask = cv2.bitwise_or(mask, mask_pink)
+
+        return mask
+
+    def detect_line_distance(self, image):
+        """
+        检测图像中黄色/粉色线条距离底部的距离。
+        """
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        mask = self._get_mask(hsv)
 
         height, width = mask.shape
         mid_x = width // 2
@@ -75,11 +90,20 @@ class LineDistanceDetector:
         return result
 
 
-def compute_line_offset(image):
+def compute_line_offset(image, detect_pink=False):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    # 黄色阈值
     lower_yellow = np.array([20, 100, 100])
     upper_yellow = np.array([30, 255, 255])
     mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    if detect_pink:
+        # 粉色阈值
+        lower_pink = np.array([140, 50, 100])
+        upper_pink = np.array([170, 255, 255])
+        mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
+        mask = cv2.bitwise_or(mask, mask_pink)
 
     height, width = mask.shape
     mid_x = width // 2
