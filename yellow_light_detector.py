@@ -89,14 +89,10 @@ def yellow_light_check(cv_img):
 
     if result:
         (x, y), r, area, diam = result
-        print(
-            f"检测到最大的黄灯: 位置=({x}, {y}), 半径={r}px, 直径={diam}px, 面积={area}px²"
-        )
         if distance is not None:
             # print(f"计算距离: {distance:.2f} 厘米")
             return distance
         else:
             print("距离计算失败：需要校准相机参数")
     else:
-        print("未检测到黄灯")
         return -1

@@ -119,8 +119,8 @@ class PIDController(Node):
         self.get_ready = False
 
         # 任务阶段
-        self.part1 = False
-        self.part2 = False
+        self.part1 = True
+        self.part2 = True
         self.part3 = False
         self.part4 = False
         self.part5 = False
@@ -166,6 +166,7 @@ class PIDController(Node):
         # ----------------------- 第二部分 ---------------------------
         self.S_road1 = False
         self.peak1 = 0
+        self.smoothed_correction = 0
         self.around1 = False
         self.around2 = False
 
@@ -184,6 +185,7 @@ class PIDController(Node):
         self.turn32 = False
 
         self.straight33 = False
+        self.straight33_fix = False
         self.saw_bar = False
         self.counter = 5
         self.counter_audio = False
@@ -534,7 +536,14 @@ class PIDController(Node):
 
     # ----------- 常用动作封装 -----------
     def run_straight(
-        self, rgb, stop_dist=None, ignore_frames=0, duration=5.0, flag=None
+        self,
+        rgb,
+        stop_dist=None,
+        ignore_frames=0,
+        duration=5.0,
+        flag=None,
+        detect_pink=False,
+        detect_purple=False,
     ):
         """直行一段，支持PID校正和距离触发停止"""
         if not self.pid_used:
@@ -551,7 +560,11 @@ class PIDController(Node):
         if stop_dist is not None:
             if not self.distance_detector_used:
                 self.distance_detector = LineDistanceDetector(
-                    roi_width=20, smooth_window=5, ignore_frames=ignore_frames
+                    roi_width=20,
+                    smooth_window=5,
+                    ignore_frames=ignore_frames,
+                    detect_pink=detect_pink,
+                    detect_purple=detect_pink,
                 )
                 self.distance_detector_used = True
             distance = self.distance_detector.detect_line_distance(rgb)
@@ -639,7 +652,7 @@ class PIDController(Node):
             ):
                 print("机器狗初始化中...")
                 # 仅置一次，避免反复计时
-                self.start_flag_timer("get_ready", 10.0, True)
+                self.start_flag_timer("get_ready", 3.0, True)
 
             # 读取最新帧
             with self._lock:
@@ -745,7 +758,7 @@ class PIDController(Node):
         # 语音播报
         elif not self.audio_finished:
             print(f"A区域库位{self.text1_result[-1]}")
-            play_tts_async(f"识别结果为{self.text1_result}")
+            play_tts_async(f"A区域库位{self.text1_result[-1]}")
             self.audio_finished = True
 
         # 第一次角度调节
@@ -847,8 +860,9 @@ class PIDController(Node):
             if not self.pid_used:
                 self.pid = PID(kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0))
                 self.pid_used = True
-                self.turned_angle = 0
-                self.peak1 = 0
+                self.turned_angle = 0.0
+                self.peak1 = 0.0
+                self.smoothed_correction = 0.0
 
             self.motioncontroller.cmd_msg.motion_id = 308
             self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
@@ -860,16 +874,21 @@ class PIDController(Node):
             self.motioncontroller.cmd_msg.vel_des = [
                 0.15 * (1 - correction),
                 0.0,
-                0.2 * correction * 3.5,
+                0.2 * correction * 4.0,
             ]
-            self.turned_angle += 0.2 * correction * 4.5
+            alpha = 0.1  # 滤波系数，0~1
+            self.smoothed_correction = (
+                alpha * correction + (1 - alpha) * self.smoothed_correction
+            )
+            self.turned_angle += self.smoothed_correction
             self.peak1 = max(self.peak1, self.turned_angle)
-            print("当前角度：", self.turned_angle / self.peak1)
-            if self.turned_angle < self.peak1 * 0.80 and not self.around1:
+            if self.peak1:
+                print("当前角度：", self.turned_angle / self.peak1)
+            if self.turned_angle < self.peak1 * 0.90 and not self.around1:
                 print("around1 finished")
                 self.around1 = True
             elif (
-                self.turned_angle > self.peak1 * 0.80
+                self.turned_angle > self.peak1 * 0.70
                 and self.around1
                 and not self.around2
             ):
@@ -885,7 +904,7 @@ class PIDController(Node):
         # 第一次直线行驶
         if not self.straight31:
             print("straight31直线行驶")
-            self.straight31 = self.run_straight(rgb, stop_dist=150, ignore_frames=3)
+            self.straight31 = self.run_straight(rgb, stop_dist=130, ignore_frames=3)
 
         # 第一次角度调节
         elif not self.adjust31:
@@ -920,7 +939,7 @@ class PIDController(Node):
         # 第一次前进补正
         elif not self.fix31:
             print("第一次前进补正")
-            self.fix31 = self.run_fix(rgb, stop_dist=30)
+            self.fix31 = self.run_fix(rgb, stop_dist=20)
 
         return self.fix31
 
@@ -943,7 +962,6 @@ class PIDController(Node):
             self.run_turn(direction="right", duration=3.0, flag="turn32")
         elif not self.straight33:
             print("straight33直线行驶")
-            """直行一段，支持PID校正和距离触发停止"""
             if not self.pid_used:
                 self.pid = PID(kp=0.6, ki=0.0, kd=0.2, output_limits=(-1.0, 1.0))
                 self.pid_used = True
@@ -958,7 +976,9 @@ class PIDController(Node):
                 self.distance_detector_used = False
                 self.pid_used = False
                 self.straight33 = True
-            self.motioncontroller.cmd_msg.motion_id = 308
+
+            deviation = detect_deviation(rgb)
+            correction = 1.5 * self.pid.calculate(0.0, deviation)
 
             # 限高杆检测
             bar_distance = height_bar_check(rgb)
@@ -967,17 +987,17 @@ class PIDController(Node):
                 self.saw_bar = True
                 self.start_flag_timer("saw_bar", 5, False)
             if self.saw_bar:
+                self.motioncontroller.cmd_msg.motion_id = 308
                 self.motioncontroller.cmd_msg.step_height = [0.02, 0.02]
                 self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.3, 0.0]
                 self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.2]
+                self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.2 * correction]
             else:
+                self.motioncontroller.cmd_msg.motion_id = 303
                 self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
                 self.motioncontroller.cmd_msg.rpy_des = [0.0, 0.0, 0.0]
-                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.235]
-
-            deviation = detect_deviation(rgb)
-            correction = 1.5 * self.pid.calculate(0.0, deviation)
-            self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.2 * correction]
+                self.motioncontroller.cmd_msg.pos_des = [0.0, 0.0, 0.2]
+                self.motioncontroller.cmd_msg.vel_des = [0.1, 0.0, 0.2 * correction]
 
         elif not self.adjust33:
             print("adjust33角度调节")
@@ -1020,39 +1040,37 @@ class PIDController(Node):
                 self.pid_used = True
                 self.counter = 5
                 self.counter_audio = False
-            if not self.distance_detector_used:
-                self.distance_detector = LineDistanceDetector(
-                    roi_width=20, smooth_window=5, ignore_frames=3, detect_pink=True
-                )
-                self.distance_detector_used = True
-            distance = self.distance_detector.detect_line_distance(rgb)
-            print("距离底线距离为：", distance)
-            if distance < 120:
-                self.distance_detector_used = False
-                self.pid_used = False
-                self.straight33 = True
-            self.motioncontroller.cmd_msg.motion_id = 308
 
             # 黄灯检测
             light_distance = yellow_light_check(rgb)
-            if light_distance > 0 and light_distance < 50 and not self.saw_bar:
-                print("检测到黄灯")
+            if light_distance > 0 and light_distance < 250 and not self.saw_bar:
+                print("检测到黄灯：", light_distance)
                 self.counter_audio = True
                 self.saw_bar = True
-            if self.counter and self.counter_audio and self.saw_bar:
+            if self.counter and self.saw_bar:
                 self.motioncontroller.cmd_msg.motion_id = 111
-                play_tts_async(self.counter)
-                self.counter -= 1
-                self.counter_audio = False
-                self.start_flag_timer("counter_audio", 1.0, True)
+                if self.counter_audio:
+                    play_tts_async(self.counter)
+                    self.counter -= 1
+                    self.counter_audio = False
+                    self.start_flag_timer("counter_audio", 1.0, True)
 
             else:
-                self.motioncontroller.cmd_msg.motion_id = 308
+                self.motioncontroller.cmd_msg.motion_id = 303
                 self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
+                deviation = detect_deviation(rgb)
+                correction = 1.5 * self.pid.calculate(0.0, deviation)
+                self.motioncontroller.cmd_msg.vel_des = [0.3, 0.0, 0.3 * correction]
 
-            deviation = detect_deviation(rgb)
-            correction = 1.5 * self.pid.calculate(0.0, deviation)
-            self.motioncontroller.cmd_msg.vel_des = [0.2, 0.0, 0.2 * correction]
+            if self.counter == 0:
+                self.pid_used = False
+                self.straight33 = True
+
+        elif not self.straight33_fix:
+            print("straight33_fix 直线行驶")
+            self.straight33_fix = self.run_straight(
+                rgb, stop_dist=120, ignore_frames=3, detect_pink=True
+            )
 
         elif not self.adjust33:
             print("adjust33角度调节")
@@ -1092,7 +1110,7 @@ class PIDController(Node):
         # 语音播报
         elif not self.audio_finished32:
             print(f"B区域库位{self.text3_result[-1]}")
-            play_tts_async(f"识别结果为{self.text3_result}")
+            play_tts_async(f"B区域库位{self.text3_result[-1]}")
             self.audio_finished32 = True
 
         elif not self.park3:
@@ -1178,7 +1196,7 @@ class PIDController(Node):
 
             # 限高杆检测
             bar_distance = height_bar_check(rgb)
-            if bar_distance > 0 and bar_distance < 30 and not self.saw_bar32:
+            if bar_distance > 0 and bar_distance < 75 and not self.saw_bar32:
                 print("检测到限高杆")
                 self.saw_bar32 = True
                 self.start_flag_timer("saw_bar32", 5, False)
@@ -1236,7 +1254,7 @@ class PIDController(Node):
 
             # 黄灯检测
             light_distance = yellow_light_check(rgb)
-            if light_distance > 0 and light_distance < 50 and not self.saw_bar32:
+            if light_distance != -1 and not self.saw_bar32:
                 print("检测到黄灯")
                 self.counter_audio = True
                 self.saw_bar32 = True
@@ -1279,8 +1297,9 @@ class PIDController(Node):
             if not self.pid_used:
                 self.pid = PID(kp=0.7, ki=0.0, kd=0.3, output_limits=(-1.0, 1.0))
                 self.pid_used = True
-                self.turned_angle = 0
-                self.peak2 = 0
+                self.turned_angle = 0.0
+                self.peak2 = 0.0
+                self.smoothed_correction = 0.0
 
             self.motioncontroller.cmd_msg.motion_id = 308
             self.motioncontroller.cmd_msg.step_height = [0.06, 0.06]
@@ -1294,7 +1313,11 @@ class PIDController(Node):
                 0.0,
                 0.2 * correction * 3.5,
             ]
-            self.turned_angle += 0.2 * correction * 4.5
+            alpha = 0.1  # 滤波系数，0~1
+            self.smoothed_correction = (
+                alpha * correction + (1 - alpha) * self.smoothed_correction
+            )
+            self.turned_angle += self.smoothed_correction
             self.peak2 = max(self.peak2, self.turned_angle)
             print("当前角度：", self.turned_angle / self.peak2)
             if self.turned_angle < self.peak2 * 0.00 and not self.around41:
